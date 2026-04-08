@@ -3,17 +3,15 @@
  * WechatChannel: composites ILinkPoller + WechatSender + WechatAdapter.
  */
 
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import type { CodexClient, AppConfig } from '@codex-app/core'
+import { appPaths } from '@codex-app/core'
 import { ILinkPoller, type PollerStatus } from '@/polling'
 import { WechatSender } from '@/sender'
-import { WechatAdapter, ensureDataDir } from '@/adapter'
+import { WechatAdapter } from '@/adapter'
 
 export type { PollerStatus } from '@/polling'
 
 const DEFAULT_CDN_BASE = 'https://novac2c.cdn.weixin.qq.com/c2c'
-const DEFAULT_DATA_DIR = join(homedir(), '.codex-app')
 
 export class WechatChannel {
   private readonly poller: ILinkPoller
@@ -21,7 +19,7 @@ export class WechatChannel {
   private readonly adapter: WechatAdapter
   private started = false
 
-  constructor(codex: CodexClient, config: AppConfig, dataDir = DEFAULT_DATA_DIR) {
+  constructor(codex: CodexClient, config: AppConfig, dataDir = appPaths.root) {
     // Poller owns the ILinkClient; sender shares it via poller.client
     this.poller = new ILinkPoller(dataDir, {
       onMessage: async (msg) => this.adapter.handleMessage(msg),
@@ -29,13 +27,12 @@ export class WechatChannel {
       onError: (err) => process.stderr.write(`[WeChat] Error: ${err}\n`),
     })
     this.sender = new WechatSender(this.poller.client, DEFAULT_CDN_BASE)
-    this.adapter = new WechatAdapter(codex, this.sender, config, dataDir)
+    this.adapter = new WechatAdapter(codex, this.sender, config)
   }
 
   async start(): Promise<void> {
     if (this.started) return
     this.started = true
-    await ensureDataDir(DEFAULT_DATA_DIR)
     this.adapter.start()
     await this.poller.start()
   }

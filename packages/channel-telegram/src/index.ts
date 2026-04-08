@@ -9,7 +9,6 @@ export type TelegramChannelOptions = {
   readonly codex: CodexClient
   readonly tokenGuard: TokenGuard
   readonly config: AppConfig
-  readonly defaultCwd?: string
 }
 
 export class TelegramChannel {
@@ -21,9 +20,6 @@ export class TelegramChannel {
     this.sender = new TelegramSender(opts.botToken)
     this.adapter = new TelegramAdapter(opts.codex, this.sender, opts.tokenGuard, opts.config)
     this.poller = new TelegramPoller(opts.botToken)
-    if (opts.defaultCwd) {
-      this.adapter.defaultCwd = opts.defaultCwd
-    }
   }
 
   start(): void {

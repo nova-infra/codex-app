@@ -198,10 +198,28 @@ export class CodexClient {
     return () => this.listeners.delete(listener)
   }
 
+  async interrupt(threadId: string): Promise<void> {
+    await this.call('turn/interrupt', { threadId })
+  }
+
   async stop(): Promise<void> {
     this.ws?.close()
-    this.codexProcess?.kill()
+
+    const proc = this.codexProcess
     this.codexProcess = null
+
+    if (proc && !proc.killed) {
+      proc.kill('SIGTERM')
+
+      const exited = await Promise.race([
+        new Promise<boolean>(resolve => proc.on('exit', () => resolve(true))),
+        new Promise<boolean>(resolve => setTimeout(() => resolve(false), 2000)),
+      ])
+
+      if (!exited && !proc.killed) {
+        proc.kill('SIGKILL')
+      }
+    }
   }
 
   get isConnected(): boolean {

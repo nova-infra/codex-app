@@ -10,9 +10,7 @@ import type { ILinkIncomingMessage, ILinkMessageItem } from '@/iLinkClient'
 import { WechatSender } from '@/sender'
 import { collectInboundTextForCodex, hasWeChatRichMediaForCommands } from '@/textFormat'
 import { buildCodexTurnInputFromWeChatItems } from '@/turnInput'
-import { resolveUserId, saveChannelBinding } from '@/channelStore'
-
-export { ensureDataDir } from '@/channelStore'
+import { findBinding, saveBinding, updateBinding } from '@codex-app/core'
 
 const DEFAULT_CDN_BASE = 'https://novac2c.cdn.weixin.qq.com/c2c'
 
@@ -67,8 +65,12 @@ export class WechatAdapter {
     private readonly codex: CodexClient,
     private readonly sender: WechatSender,
     private readonly config: AppConfig,
-    private readonly dataDir: string,
   ) {}
+
+  private async resolveCwd(chatId: string): Promise<string> {
+    const b = await findBinding('wechat', chatId) as { cwd?: string } | null
+    return b?.cwd ?? process.cwd()
+  }
 
   start(): void {
     this.notificationUnsub?.()
@@ -104,11 +106,11 @@ export class WechatAdapter {
       return
     }
 
-    const userId = await resolveUserId(this.dataDir, chatId)
+    const userId = (await findBinding('wechat', chatId))?.userId ?? null
     if (!userId) {
       // Single user: auto-bind without asking
       if (this.config.users.length === 1) {
-        await saveChannelBinding(this.dataDir, chatId, this.config.users[0].id)
+        await saveBinding({ type: 'wechat', externalId: chatId, userId: this.config.users[0].id, updatedAt: new Date().toISOString() })
         const name = this.config.users[0].name
         await this.sendRaw(chatId, `已自动绑定用户 ${name}，发消息开始使用 Codex。`)
         return
@@ -159,6 +161,12 @@ export class WechatAdapter {
       await this.sendRaw(chatId, `已连接会话：${threadId}${cwd ? `\n当前目录：${cwd}` : ''}`)
       return true
     }
+    const projectMatch = cmd.match(/^\/project\s+(\S+)$/)
+    if (projectMatch) {
+      await updateBinding('wechat', chatId, { cwd: projectMatch[1] })
+      await this.sendRaw(chatId, `项目目录已设为：${projectMatch[1]}`)
+      return true
+    }
     return false
   }
 
@@ -175,7 +183,7 @@ export class WechatAdapter {
   private async handleTokenBind(chatId: string, token: string): Promise<void> {
     const entry = this.config.tokens.find((t) => t.token === token.trim())
     if (!entry) { await this.sendRaw(chatId, 'Token 无效，请重新发送正确的 token：'); return }
-    await saveChannelBinding(this.dataDir, chatId, entry.userId)
+    await saveBinding({ type: 'wechat', externalId: chatId, userId: entry.userId, updatedAt: new Date().toISOString() })
     this.pendingTokenBind.delete(chatId)
     const user = this.config.users.find((u) => u.id === entry.userId)
     await this.sendRaw(chatId, `绑定成功！欢迎 ${user?.name ?? entry.userId}，发消息开始使用 Codex。`)
@@ -229,7 +237,7 @@ export class WechatAdapter {
   }
 
   private async createThread(chatId: string): Promise<string> {
-    const response = asRecord(await this.codex.call('thread/start', { cwd: process.cwd() }))
+    const response = asRecord(await this.codex.call('thread/start', { cwd: await this.resolveCwd(chatId) }))
     const thread = asRecord(response?.thread)
     const threadId = typeof thread?.id === 'string' ? thread.id : ''
     if (!threadId) throw new Error('thread/start did not return thread id')

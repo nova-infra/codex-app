@@ -1,6 +1,13 @@
 /**
  * Convert Markdown to Telegram-safe HTML.
- * Handles: bold, italic, code, pre, links. Escapes angle brackets in non-tag positions.
+ *
+ * Pipeline (placeholder protection):
+ *  1. Extract fenced code blocks  → \x00CB{n}\x00
+ *  2. Extract inline code         → \x00IC{n}\x00
+ *  3. Extract tables              → \x00TB{n}\x00
+ *  4. Escape HTML in remaining text
+ *  5. Convert markdown (headers, bold, italic, strike, links, blockquote, hr, lists)
+ *  6. Restore placeholders
  */
 
 function escapeHtml(text: string): string {
@@ -10,68 +17,176 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;')
 }
 
-export function markdownToTelegramHtml(md: string): string {
-  let result = ''
-  const lines = md.split('\n')
-  let inCodeBlock = false
-  let codeLang = ''
-  let codeLines: string[] = []
+// ---------------------------------------------------------------------------
+// Table helpers
+// ---------------------------------------------------------------------------
 
-  for (const line of lines) {
-    // Code block toggle
-    const fenceMatch = line.match(/^```(\w*)/)
-    if (fenceMatch) {
-      if (!inCodeBlock) {
-        inCodeBlock = true
-        codeLang = fenceMatch[1] ?? ''
-        codeLines = []
-      } else {
-        // Close code block
-        const langAttr = codeLang ? ` class="language-${escapeHtml(codeLang)}"` : ''
-        result += `<pre><code${langAttr}>${escapeHtml(codeLines.join('\n'))}</code></pre>\n`
-        inCodeBlock = false
-        codeLang = ''
-        codeLines = []
-      }
-      continue
-    }
-
-    if (inCodeBlock) {
-      codeLines.push(line)
-      continue
-    }
-
-    result += formatInline(line) + '\n'
-  }
-
-  // Unclosed code block: dump as pre
-  if (inCodeBlock && codeLines.length > 0) {
-    result += `<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>\n`
-  }
-
-  return result.trimEnd()
+function isTableRow(line: string): boolean {
+  return /^\|.+\|/.test(line.trim())
 }
 
-function formatInline(line: string): string {
-  // Escape HTML first
-  let s = escapeHtml(line)
+function isSeparatorRow(line: string): boolean {
+  return /^\|[\s\-:|]+\|/.test(line.trim())
+}
 
-  // Headers → bold
-  s = s.replace(/^#{1,6}\s+(.+)$/, '<b>$1</b>')
+function formatTable(lines: string[]): string {
+  // Filter out separator rows for rendering
+  const dataLines = lines.filter(l => !isSeparatorRow(l))
 
-  // Inline code (must come before bold/italic to avoid conflicts)
-  s = s.replace(/`([^`]+)`/g, '<code>$1</code>')
+  // Split each row into cells
+  const rows = dataLines.map(l =>
+    l
+      .trim()
+      .replace(/^\||\|$/g, '')
+      .split('|')
+      .map(c => c.trim()),
+  )
 
-  // Bold: **text** or __text__
-  s = s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-  s = s.replace(/__(.+?)__/g, '<b>$1</b>')
+  if (rows.length === 0) return lines.join('\n')
 
-  // Italic: *text* or _text_ (but not inside words with underscores)
-  s = s.replace(/(?<!\w)\*([^*]+)\*(?!\w)/g, '<i>$1</i>')
-  s = s.replace(/(?<!\w)_([^_]+)_(?!\w)/g, '<i>$1</i>')
+  // Compute column widths
+  const colCount = Math.max(...rows.map(r => r.length))
+  const widths: number[] = Array.from({ length: colCount }, (_, i) =>
+    Math.max(...rows.map(r => (r[i] ?? '').length)),
+  )
 
-  // Links: [text](url)
-  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+  const formatted = rows.map(cells => {
+    const padded = Array.from({ length: colCount }, (_, i) =>
+      (cells[i] ?? '').padEnd(widths[i]),
+    )
+    return '| ' + padded.join(' | ') + ' |'
+  })
 
-  return s
+  return formatted.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Main converter
+// ---------------------------------------------------------------------------
+
+export function markdownToTelegramHtml(md: string): string {
+  const codeBlocks: string[] = []
+  const inlineCodes: string[] = []
+  const tables: string[] = []
+
+  // Step 1: Extract fenced code blocks
+  let text = md.replace(/```(\w*)\n?([\s\S]*?)```/g, (_match, lang: string, body: string) => {
+    const langAttr = lang ? ` class="language-${escapeHtml(lang)}"` : ''
+    const html = `<pre><code${langAttr}>${escapeHtml(body.replace(/\n$/, ''))}</code></pre>`
+    const idx = codeBlocks.push(html) - 1
+    return `\x00CB${idx}\x00`
+  })
+
+  // Step 2: Extract inline code
+  text = text.replace(/`([^`\n]+)`/g, (_match, code: string) => {
+    const html = `<code>${escapeHtml(code)}</code>`
+    const idx = inlineCodes.push(html) - 1
+    return `\x00IC${idx}\x00`
+  })
+
+  // Step 3: Extract tables (consecutive lines that look like table rows)
+  text = text.replace(/((?:^\|.+\|\n?)+)/gm, (block: string) => {
+    const lines = block.split('\n').filter(l => l.trim() !== '')
+    if (lines.length < 2) return block
+    const hasHeader = lines.some(isSeparatorRow)
+    if (!hasHeader) return block
+    const tableText = formatTable(lines)
+    const html = `<pre>${escapeHtml(tableText)}</pre>`
+    const idx = tables.push(html) - 1
+    return `\x00TB${idx}\x00`
+  })
+
+  // Step 4: Escape HTML in remaining text
+  // We need to escape only the non-placeholder portions
+  text = text
+    .split(/(\x00(?:CB|IC|TB)\d+\x00)/)
+    .map(part => (/^\x00(?:CB|IC|TB)\d+\x00$/.test(part) ? part : escapeHtml(part)))
+    .join('')
+
+  // Step 5: Convert markdown syntax
+  const lines = text.split('\n')
+  const outputLines = lines.map(line => {
+    // Skip lines that are entirely a placeholder
+    if (/^\x00(?:CB|IC|TB)\d+\x00$/.test(line.trim())) return line
+
+    let s = line
+
+    // Headings → bold
+    s = s.replace(/^#{1,6}\s+(.+)$/, '<b>$1</b>')
+
+    // Blockquote
+    s = s.replace(/^&gt;\s*(.*)$/, '<blockquote>$1</blockquote>')
+
+    // Horizontal rule
+    s = s.replace(/^---+$/, '———')
+
+    // Unordered list
+    s = s.replace(/^(\s*)[-*]\s+(.+)$/, '$1• $2')
+
+    // Strikethrough ~~text~~
+    s = s.replace(/~~(.+?)~~/g, '<s>$1</s>')
+
+    // Bold: **text** or __text__
+    s = s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    s = s.replace(/__(.+?)__/g, '<b>$1</b>')
+
+    // Italic: *text* or _text_ (word-boundary aware)
+    s = s.replace(/(?<!\w)\*([^*\n]+)\*(?!\w)/g, '<i>$1</i>')
+    s = s.replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, '<i>$1</i>')
+
+    // Links: [text](url)
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+
+    return s
+  })
+
+  text = outputLines.join('\n')
+
+  // Step 6: Restore placeholders
+  text = text.replace(/\x00IC(\d+)\x00/g, (_m, i) => inlineCodes[Number(i)] ?? '')
+  text = text.replace(/\x00TB(\d+)\x00/g, (_m, i) => tables[Number(i)] ?? '')
+  text = text.replace(/\x00CB(\d+)\x00/g, (_m, i) => codeBlocks[Number(i)] ?? '')
+
+  return text.trimEnd()
+}
+
+// ---------------------------------------------------------------------------
+// Message splitter
+// ---------------------------------------------------------------------------
+
+/**
+ * Split an HTML string into chunks of at most `maxLen` characters.
+ * Prefers splitting at paragraph boundaries, then line boundaries, then hard cut.
+ */
+export function splitTelegramMessage(html: string, maxLen = 4096): readonly string[] {
+  if (html.length <= maxLen) return [html]
+
+  const chunks: string[] = []
+  let remaining = html
+
+  while (remaining.length > maxLen) {
+    let splitAt = -1
+
+    // Try paragraph boundary (\n\n) within maxLen
+    const paraIdx = remaining.lastIndexOf('\n\n', maxLen)
+    if (paraIdx > 0) {
+      splitAt = paraIdx + 2
+    } else {
+      // Try line boundary (\n)
+      const lineIdx = remaining.lastIndexOf('\n', maxLen)
+      if (lineIdx > 0) {
+        splitAt = lineIdx + 1
+      } else {
+        // Hard cut
+        splitAt = maxLen
+      }
+    }
+
+    chunks.push(remaining.slice(0, splitAt))
+    remaining = remaining.slice(splitAt)
+  }
+
+  if (remaining.length > 0) chunks.push(remaining)
+
+  return chunks
 }

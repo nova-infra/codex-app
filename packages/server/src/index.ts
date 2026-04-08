@@ -8,7 +8,7 @@ import {
 } from '@codex-app/core'
 import { WsProxy, type WsData } from './ws/wsProxy'
 
-const { config, created, adminToken } = bootstrapConfig()
+const { config, created, adminToken } = await bootstrapConfig()
 
 console.log(`[codex-app] Loading config from ~/.codex-app/config.json`)
 console.log(`[codex-app] Port: ${config.port}, Codex port: ${config.codex.port}`)

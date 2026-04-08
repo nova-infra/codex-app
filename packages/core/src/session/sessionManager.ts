@@ -24,7 +24,7 @@ export class SessionManager {
       lastActiveAt: new Date().toISOString(),
     }
 
-    this.store.save(meta)
+    await this.store.save(meta)
     return meta
   }
 
@@ -33,11 +33,11 @@ export class SessionManager {
       threadId: sessionId,
       ...(projectDir ? { cwd: projectDir } : {}),
     })
-    this.store.updateLastActive(sessionId)
+    await this.store.updateLastActive(sessionId)
   }
 
   async getOrCreateSession(userId: string, projectDir: string): Promise<SessionMeta> {
-    const latest = this.store.findLatest(userId, projectDir)
+    const latest = await this.store.findLatest(userId, projectDir)
     if (latest) {
       await this.resumeSession(latest.sessionId, projectDir)
       return latest
@@ -45,31 +45,31 @@ export class SessionManager {
     return this.startSession(userId, projectDir)
   }
 
-  listSessions(userId: string, projectDir?: string): readonly SessionMeta[] {
+  async listSessions(userId: string, projectDir?: string): Promise<readonly SessionMeta[]> {
     if (projectDir) {
-      return this.store.findByProject(userId, projectDir)
+      return await this.store.findByProject(userId, projectDir)
     }
-    return this.store.findByUser(userId)
+    return await this.store.findByUser(userId)
   }
 
   async archiveSession(sessionId: string): Promise<void> {
     await this.codex.call('thread/archive', { threadId: sessionId })
-    this.store.remove(sessionId)
+    await this.store.remove(sessionId)
   }
 
   async compactSession(sessionId: string): Promise<void> {
     await this.codex.call('thread/compact/start', { threadId: sessionId })
   }
 
-  touchSession(sessionId: string): void {
-    this.store.updateLastActive(sessionId)
+  async touchSession(sessionId: string): Promise<void> {
+    await this.store.updateLastActive(sessionId)
   }
 
   /**
    * Register a session that was created externally (e.g. via transparent WS proxy).
    * Saves the session meta without calling codex again.
    */
-  registerSession(userId: string, sessionId: string, projectDir: string): void {
+  async registerSession(userId: string, sessionId: string, projectDir: string): Promise<void> {
     const meta: SessionMeta = {
       sessionId,
       userId,
@@ -77,6 +77,6 @@ export class SessionManager {
       createdAt: new Date().toISOString(),
       lastActiveAt: new Date().toISOString(),
     }
-    this.store.save(meta)
+    await this.store.save(meta)
   }
 }

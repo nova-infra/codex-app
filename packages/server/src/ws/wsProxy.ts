@@ -46,9 +46,11 @@ export class WsProxy {
     console.log(`[ws] Connected: ${userName} (${userId})`)
 
     // Subscribe to notifications for all pre-existing sessions of this user
-    for (const s of this.sessions.listSessions(userId)) {
-      this.subscribe(ws, s.sessionId)
-    }
+    void this.sessions.listSessions(userId).then(sessions => {
+      for (const s of sessions) {
+        this.subscribe(ws, s.sessionId)
+      }
+    })
   }
 
   async message(ws: WsConn, raw: string | Buffer): Promise<void> {
@@ -64,11 +66,11 @@ export class WsProxy {
 
     console.log(`[ws] ${userId} → ${msg.method}`)
 
-    if (!this.checkOwnership(ws, msg)) return
+    if (!await this.checkOwnership(ws, msg)) return
 
     try {
       const result = await this.codex.call(msg.method, msg.params ?? {})
-      this.postCall(ws, userId, msg, result)
+      await this.postCall(ws, userId, msg, result)
       ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }))
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Internal error'
@@ -87,14 +89,15 @@ export class WsProxy {
   }
 
   // Returns false and sends error if ownership check fails
-  private checkOwnership(ws: WsConn, msg: JsonRpcRequest): boolean {
+  private async checkOwnership(ws: WsConn, msg: JsonRpcRequest): Promise<boolean> {
     if (!OWNED_METHODS.has(msg.method)) return true
 
     const threadId = msg.params?.threadId as string | undefined
     if (!threadId) return true
 
     const { userId } = ws.data
-    if (this.sessions.listSessions(userId).some(s => s.sessionId === threadId)) return true
+    const sessions = await this.sessions.listSessions(userId)
+    if (sessions.some(s => s.sessionId === threadId)) return true
 
     ws.send(JSON.stringify({
       jsonrpc: '2.0',
@@ -105,12 +108,12 @@ export class WsProxy {
   }
 
   // Register new sessions and update notification subscriptions after a successful call
-  private postCall(ws: WsConn, userId: string, msg: JsonRpcRequest, result: unknown): void {
+  private async postCall(ws: WsConn, userId: string, msg: JsonRpcRequest, result: unknown): Promise<void> {
     if (msg.method === 'thread/start') {
       const res = result as { threadId?: string } | null
       if (res?.threadId) {
         const projectDir = (msg.params?.cwd as string) ?? ''
-        this.sessions.registerSession(userId, res.threadId, projectDir)
+        await this.sessions.registerSession(userId, res.threadId, projectDir)
         this.subscribe(ws, res.threadId)
       }
       return

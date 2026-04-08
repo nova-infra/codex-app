@@ -1,6 +1,6 @@
-import { homedir } from 'node:os'
-import { join } from 'node:path'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readFile, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { appPaths, ensureDirs } from '@/paths'
 
 export type UserEntry = {
   readonly id: string
@@ -35,10 +35,15 @@ export type AppConfig = {
   readonly tokens: readonly TokenEntry[]
   readonly telegram?: TelegramConfig
   readonly wechat?: WechatConfig
+  readonly defaultCwd?: string
+  readonly streaming?: {
+    readonly enabled?: boolean
+    readonly editIntervalMs?: number
+    readonly minChars?: number
+    readonly maxChars?: number
+    readonly idleMs?: number
+  }
 }
-
-const CONFIG_DIR = join(homedir(), '.codex-app')
-const CONFIG_PATH = join(CONFIG_DIR, 'config.json')
 
 const DEFAULT_CONFIG: AppConfig = {
   port: 8765,
@@ -50,32 +55,36 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   users: [],
   tokens: [],
+  streaming: {
+    enabled: true,
+    editIntervalMs: 2000,
+    minChars: 80,
+    maxChars: 2000,
+    idleMs: 600,
+  },
 }
 
+/** @deprecated Use appPaths.root instead */
 export function getConfigDir(): string {
-  return CONFIG_DIR
+  return appPaths.root
 }
 
-export function loadConfig(): AppConfig {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true })
-  }
+export async function loadConfig(): Promise<AppConfig> {
+  await ensureDirs(appPaths)
 
-  if (!existsSync(CONFIG_PATH)) {
-    writeFileSync(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2))
+  if (!existsSync(appPaths.config)) {
+    await writeFile(appPaths.config, JSON.stringify(DEFAULT_CONFIG, null, 2))
     return DEFAULT_CONFIG
   }
 
-  const raw = readFileSync(CONFIG_PATH, 'utf-8')
+  const raw = await readFile(appPaths.config, 'utf-8')
   const parsed = JSON.parse(raw) as AppConfig
   return { ...DEFAULT_CONFIG, ...parsed }
 }
 
-export function saveConfig(config: AppConfig): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true })
-  }
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2))
+export async function saveConfig(config: AppConfig): Promise<void> {
+  await ensureDirs(appPaths)
+  await writeFile(appPaths.config, JSON.stringify(config, null, 2))
 }
 
 function generateToken(): string {
@@ -94,8 +103,8 @@ export type BootstrapResult = {
   readonly adminToken?: string
 }
 
-export function bootstrapConfig(): BootstrapResult {
-  const config = loadConfig()
+export async function bootstrapConfig(): Promise<BootstrapResult> {
+  const config = await loadConfig()
 
   if (config.users.length > 0) {
     return { config, created: false }
@@ -110,11 +119,11 @@ export function bootstrapConfig(): BootstrapResult {
     tokens: [{ token, userId, label: 'auto-generated' }],
   }
 
-  saveConfig(newConfig)
+  await saveConfig(newConfig)
   return { config: newConfig, created: true, adminToken: token }
 }
 
-export function addUser(config: AppConfig, name: string): { config: AppConfig; token: string; userId: string } {
+export async function addUser(config: AppConfig, name: string): Promise<{ config: AppConfig; token: string; userId: string }> {
   const userId = generateUserId()
   const token = generateToken()
 
@@ -124,11 +133,11 @@ export function addUser(config: AppConfig, name: string): { config: AppConfig; t
     tokens: [...config.tokens, { token, userId, label: `${name}` }],
   }
 
-  saveConfig(newConfig)
+  await saveConfig(newConfig)
   return { config: newConfig, token, userId }
 }
 
-export function revokeToken(config: AppConfig, token: string): AppConfig | null {
+export async function revokeToken(config: AppConfig, token: string): Promise<AppConfig | null> {
   const entry = config.tokens.find(t => t.token === token)
   if (!entry) return null
 
@@ -137,7 +146,7 @@ export function revokeToken(config: AppConfig, token: string): AppConfig | null 
     tokens: config.tokens.filter(t => t.token !== token),
   }
 
-  saveConfig(newConfig)
+  await saveConfig(newConfig)
   return newConfig
 }
 
