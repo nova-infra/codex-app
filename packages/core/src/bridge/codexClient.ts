@@ -49,7 +49,11 @@ export class CodexClient {
       // "Missing environment variable: OPENAI_API_KEY". Keep this preflight
       // warning here so the root cause is obvious in logs before the child exits.
       if (!process.env['OPENAI_API_KEY']) {
-        console.warn('[codex-app] Warning: OPENAI_API_KEY is missing; codex app-server may fail to start. Check systemd EnvironmentFile / deploy env.')
+        throw new Error(
+          'Missing environment variable: OPENAI_API_KEY. ' +
+          'codex app-server requires it in the service environment. ' +
+          'Check systemd EnvironmentFile / deploy env.',
+        )
       }
 
       const args = [

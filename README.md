@@ -260,6 +260,16 @@ bun run build
 ./codex-app-server
 ```
 
+### 部署注意事项
+
+- **必须提供 `OPENAI_API_KEY`**。否则 `codex app-server` 无法启动，并会报错：
+  - `Missing environment variable: OPENAI_API_KEY`
+- **编译版不要把 channel 启动改回动态 `import('@codex-app/channel-*')`**。
+  `bun build --compile` 下，这类 workspace 动态 import 可能不会被正确打进二进制，运行时会出现：
+  - `Cannot find module '@codex-app/channel-telegram'`
+  - `Cannot find module '@codex-app/channel-wechat'`
+- 这两个坑都已经反复出现过，部署和重构时都要保留当前做法。
+
 ### systemd 示例
 
 ```ini
@@ -271,6 +281,7 @@ After=network.target
 Type=simple
 ExecStart=/opt/codex-app/codex-app-server
 WorkingDirectory=/opt/codex-app
+Environment=OPENAI_API_KEY=your-openai-api-key
 Restart=always
 RestartSec=5
 
