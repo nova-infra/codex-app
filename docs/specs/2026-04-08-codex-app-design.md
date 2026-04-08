@@ -64,17 +64,18 @@ TG Bot ──long polling──▸      │ (同一服务层)
 ```
 Token (= User)
 ──────────────
-token:      string (手动指定，如 "bigo-main", "test-01")
+token:      string (手动指定，如 "my-main", "test-01")
 label?:     string (可选备注)
-channels:   ChannelBinding[] (绑定的 TG/WX 账号)
-createdAt:  Date
 ```
 
 - 每个 token 是独立用户，会话相互隔离
-- 不同 token 对应不同用户
-- token 在配置文件中手动指定，无注册接口
+- token 在 config.json 中手动指定，无注册接口
+- RN App 连接时通过 `?token=xxx` 认证
+- 一个 token 可绑定任意数量的 TG/WX 账号，共享会话
 
 ### Channel 绑定
+
+运行时自动持久化到 `~/.codex-app/channels.json`：
 
 ```
 ChannelBinding {
@@ -84,7 +85,11 @@ ChannelBinding {
 }
 ```
 
-TG/WX 首次交互时绑定 externalId → token。
+绑定流程（TG/WX 首次使用时）：
+1. 用户首次发消息 → 未绑定
+2. Bot 回复："请发送你的 token 完成绑定"
+3. 用户发送 token → 校验存在 → 写入 channels.json
+4. 后续消息通过 externalId 查到 token → 共享该 token 下所有会话
 
 ## 会话生命周期
 
@@ -330,7 +335,7 @@ codex app-server 由 codex-app 管理生命周期，单二进制搞定一切。
     "sandbox": "danger-full-access"
   },
   "tokens": [
-    { "token": "bigo-main", "label": "Bigo 主力" },
+    { "token": "my-main", "label": "主力" },
     { "token": "test-01", "label": "测试用" }
   ],
   "telegram": {
