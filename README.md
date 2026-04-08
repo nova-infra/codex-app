@@ -2,6 +2,13 @@
 
 统一的 Codex 服务层，为 RN App / Telegram / 微信提供 AI 编程能力。包装 OpenAI `codex app-server`，通过 WebSocket 代理 JSON-RPC 协议。
 
+## 文档路由
+
+| 需要了解 | 读这个 |
+|---------|--------|
+| 完整设计文档 | `docs/specs/2026-04-08-codex-app-design.md` |
+| 版本/发布工作流 | `docs/workflows/versioning-and-release.md` |
+
 ## 架构
 
 ```

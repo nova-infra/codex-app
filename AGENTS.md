@@ -7,6 +7,7 @@
 | 需要了解 | 读这个 |
 |---------|--------|
 | 完整设计文档 | `docs/specs/2026-04-08-codex-app-design.md` |
+| 版本/发布工作流 | `docs/workflows/versioning-and-release.md` |
 
 ## 架构概览
 
