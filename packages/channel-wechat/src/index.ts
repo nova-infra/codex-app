@@ -1,5 +1,57 @@
-// @codex-app/channel-wechat
-// WeChat iLink channel adapter — webhook, sender, adapter
-// TODO: implement in team task
+/**
+ * @codex-app/channel-wechat
+ * WechatChannel: composites ILinkPoller + WechatSender + WechatAdapter.
+ */
 
-export const name = 'channel-wechat'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import type { CodexClient, AppConfig } from '@codex-app/core'
+import { ILinkPoller, type PollerStatus } from '@/polling'
+import { WechatSender } from '@/sender'
+import { WechatAdapter, ensureDataDir } from '@/adapter'
+
+export type { PollerStatus } from '@/polling'
+
+const DEFAULT_CDN_BASE = 'https://novac2c.cdn.weixin.qq.com/c2c'
+const DEFAULT_DATA_DIR = join(homedir(), '.codex-app')
+
+export class WechatChannel {
+  private readonly poller: ILinkPoller
+  private readonly sender: WechatSender
+  private readonly adapter: WechatAdapter
+  private started = false
+
+  constructor(codex: CodexClient, config: AppConfig, dataDir = DEFAULT_DATA_DIR) {
+    // Poller owns the ILinkClient; sender shares it via poller.client
+    this.poller = new ILinkPoller(dataDir, {
+      onMessage: async (msg) => this.adapter.handleMessage(msg),
+      onQrUrl: (url) => process.stdout.write(`[WeChat] QR code URL: ${url}\n`),
+      onError: (err) => process.stderr.write(`[WeChat] Error: ${err}\n`),
+    })
+    this.sender = new WechatSender(this.poller.client, DEFAULT_CDN_BASE)
+    this.adapter = new WechatAdapter(codex, this.sender, config, dataDir)
+  }
+
+  async start(): Promise<void> {
+    if (this.started) return
+    this.started = true
+    await ensureDataDir(DEFAULT_DATA_DIR)
+    this.adapter.start()
+    await this.poller.start()
+  }
+
+  stop(): void {
+    this.started = false
+    this.poller.stop()
+    this.adapter.stop()
+  }
+
+  get status(): PollerStatus {
+    return this.poller.status
+  }
+}
+
+export { ILinkClient } from '@/iLinkClient'
+export { WechatSender } from '@/sender'
+export { WechatAdapter } from '@/adapter'
+export { ILinkPoller } from '@/polling'

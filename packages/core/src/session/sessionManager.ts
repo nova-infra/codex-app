@@ -64,4 +64,19 @@ export class SessionManager {
   touchSession(sessionId: string): void {
     this.store.updateLastActive(sessionId)
   }
+
+  /**
+   * Register a session that was created externally (e.g. via transparent WS proxy).
+   * Saves the session meta without calling codex again.
+   */
+  registerSession(userId: string, sessionId: string, projectDir: string): void {
+    const meta: SessionMeta = {
+      sessionId,
+      userId,
+      projectDir,
+      createdAt: new Date().toISOString(),
+      lastActiveAt: new Date().toISOString(),
+    }
+    this.store.save(meta)
+  }
 }

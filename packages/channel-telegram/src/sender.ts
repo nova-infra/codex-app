@@ -1,0 +1,75 @@
+import type { InlineKeyboard } from '@/types'
+
+export const EDIT_INTERVAL_MS = 800
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v !== null && typeof v === 'object' && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : null
+}
+
+export class TelegramSender {
+  constructor(private readonly token: string) {}
+
+  async sendMessage(chatId: number, text: string, keyboard?: InlineKeyboard): Promise<number> {
+    const trimmed = text.trim()
+    if (!trimmed) return 0
+    const body: Record<string, unknown> = { chat_id: chatId, text: trimmed }
+    if (keyboard) body.reply_markup = keyboard
+    const data = asRecord(await this.post('sendMessage', body))
+    const result = asRecord(data?.result)
+    return typeof result?.message_id === 'number' ? result.message_id : 0
+  }
+
+  async editMessageText(chatId: number, messageId: number, text: string): Promise<void> {
+    if (!text.trim() || !messageId) return
+    await this.post('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text: text.trim(),
+    })
+  }
+
+  async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
+    const body: Record<string, unknown> = { callback_query_id: callbackQueryId }
+    if (text) body.text = text
+    await this.post('answerCallbackQuery', body)
+  }
+
+  async sendChatAction(chatId: number): Promise<void> {
+    await this.post('sendChatAction', { chat_id: chatId, action: 'typing' })
+  }
+
+  async setMyCommands(commands: Array<{ command: string; description: string }>): Promise<void> {
+    await this.post('setMyCommands', { commands })
+  }
+
+  async downloadPhoto(fileId: string): Promise<string> {
+    const getFileRes = await fetch(
+      `https://api.telegram.org/bot${this.token}/getFile?file_id=${encodeURIComponent(fileId)}`,
+    )
+    if (!getFileRes.ok) throw new Error(`getFile failed: ${getFileRes.status}`)
+    const fileData = await getFileRes.json() as { result?: { file_path?: string } }
+    const filePath = fileData.result?.file_path
+    if (!filePath) throw new Error('getFile: missing file_path')
+    const dlRes = await fetch(
+      `https://api.telegram.org/file/bot${this.token}/${filePath}`,
+    )
+    if (!dlRes.ok) throw new Error(`download failed: ${dlRes.status}`)
+    const buf = Buffer.from(await dlRes.arrayBuffer())
+    return `data:image/jpeg;base64,${buf.toString('base64')}`
+  }
+
+  private url(method: string): string {
+    return `https://api.telegram.org/bot${this.token}/${method}`
+  }
+
+  private async post(method: string, body: Record<string, unknown>): Promise<unknown> {
+    const res = await fetch(this.url(method), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return res.json()
+  }
+}

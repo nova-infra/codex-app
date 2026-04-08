@@ -1,4 +1,12 @@
-import { loadConfig, CodexClient, TokenGuard, SessionManager, NotificationHub } from '@codex-app/core'
+import {
+  loadConfig,
+  CodexClient,
+  TokenGuard,
+  SessionManager,
+  NotificationHub,
+  type AppConfig,
+} from '@codex-app/core'
+import { WsProxy, type WsData } from './ws/wsProxy'
 
 const config = loadConfig()
 
@@ -19,19 +27,21 @@ console.log(`[codex-app] Starting codex app-server on ws://127.0.0.1:${config.co
 await codex.start()
 console.log(`[codex-app] Codex app-server connected`)
 
-// Session & Notification
+// Service layer
 const sessionManager = new SessionManager(codex)
 const notificationHub = new NotificationHub(codex)
 notificationHub.start()
 
-// HTTP + WS Server
-const server = Bun.serve({
+// WS proxy
+const wsProxy = new WsProxy(codex, sessionManager, notificationHub)
+
+// HTTP + WS server
+const server = Bun.serve<WsData>({
   port: config.port,
 
   fetch(req, server) {
     const url = new URL(req.url)
 
-    // Health check
     if (url.pathname === '/health') {
       return new Response(JSON.stringify({
         status: 'ok',
@@ -39,15 +49,18 @@ const server = Bun.serve({
       }), { headers: { 'content-type': 'application/json' } })
     }
 
-    // WebSocket upgrade
     if (url.pathname === '/ws') {
       const token = url.searchParams.get('token')
       const user = tokenGuard.verify(token)
       if (!user) {
         return new Response('Unauthorized', { status: 401 })
       }
-      const upgraded = server.upgrade(req, { data: { userId: user.userId, userName: user.userName, tokenLabel: user.tokenLabel } })
-      if (!upgraded) {
+      const data: WsData = {
+        userId: user.userId,
+        userName: user.userName,
+        tokenLabel: user.tokenLabel,
+      }
+      if (!server.upgrade(req, { data })) {
         return new Response('WebSocket upgrade failed', { status: 500 })
       }
       return undefined
@@ -57,38 +70,54 @@ const server = Bun.serve({
   },
 
   websocket: {
-    open(ws) {
-      const { userId, userName } = ws.data as { userId: string; userName: string; tokenLabel?: string }
-      console.log(`[ws] Connected: ${userName} (${userId})`)
-    },
-
-    message(ws, raw) {
-      const { userId } = ws.data as { userId: string }
-      try {
-        const msg = JSON.parse(typeof raw === 'string' ? raw : raw.toString())
-        console.log(`[ws] ${userId} → ${msg.method ?? 'unknown'}`)
-
-        // Forward to codex
-        codex.call(msg.method, msg.params).then((result) => {
-          ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }))
-        }).catch((err: Error) => {
-          ws.send(JSON.stringify({
-            jsonrpc: '2.0',
-            id: msg.id,
-            error: { code: -1, message: err.message },
-          }))
-        })
-      } catch {
-        ws.send(JSON.stringify({ error: 'invalid JSON' }))
-      }
-    },
-
-    close(ws) {
-      const { userId, userName } = ws.data as { userId: string; userName: string }
-      console.log(`[ws] Disconnected: ${userName} (${userId})`)
-    },
+    open(ws) { wsProxy.open(ws) },
+    message(ws, raw) { void wsProxy.message(ws, raw) },
+    close(ws) { wsProxy.close(ws) },
   },
 })
 
 console.log(`[codex-app] Ready at http://localhost:${server.port}`)
 console.log(`[codex-app] WebSocket: ws://localhost:${server.port}/ws?token=<your-token>`)
+
+// Start channel adapters (if configured)
+await startChannels(config)
+
+// ── Channel startup ──────────────────────────────────────────────────────────
+
+type ChannelDeps = {
+  readonly config: AppConfig
+  readonly codex: CodexClient
+  readonly sessions: SessionManager
+  readonly hub: NotificationHub
+}
+
+type ChannelModule = {
+  start?: (deps: ChannelDeps) => Promise<void>
+}
+
+async function startChannels(cfg: AppConfig): Promise<void> {
+  const deps: ChannelDeps = { config: cfg, codex, sessions: sessionManager, hub: notificationHub }
+
+  if (cfg.telegram?.botToken) {
+    await startChannel('@codex-app/channel-telegram', deps)
+  }
+
+  if (cfg.wechat?.enabled) {
+    await startChannel('@codex-app/channel-wechat', deps)
+  }
+}
+
+async function startChannel(pkg: string, deps: ChannelDeps): Promise<void> {
+  try {
+    const mod = await import(pkg) as ChannelModule
+    if (typeof mod.start === 'function') {
+      await mod.start(deps)
+      console.log(`[codex-app] ${pkg} started`)
+    } else {
+      console.log(`[codex-app] ${pkg} not yet implemented (stub)`)
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`[codex-app] Failed to start ${pkg}: ${message}`)
+  }
+}
