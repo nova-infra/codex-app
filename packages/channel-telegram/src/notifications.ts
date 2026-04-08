@@ -1,11 +1,13 @@
 /**
- * Notification handlers for codex events (tool progress, turn completion, token usage).
- * Stateless functions that receive a NotificationContext from the adapter.
+ * Notification handlers for codex events.
+ * Handles: tool progress, streaming text deltas, turn completion, token usage.
  */
 
 import type { CodexClient } from '@codex-app/core'
+import { StreamCoalescer } from '@codex-app/core'
 import type { TelegramSender } from '@/sender'
-import { markdownToTelegramHtml } from '@/format'
+import { EditStreamEditor } from '@/streamEditor'
+import { markdownToTelegramHtml, splitTelegramMessage } from '@/format'
 
 export type TurnProgress = {
   chatId: number
@@ -14,14 +16,27 @@ export type TurnProgress = {
   lastEditAt: number
 }
 
+/** Per-thread streaming state: coalescer + editor pair. */
+export type StreamingState = {
+  readonly editor: EditStreamEditor
+  readonly coalescer: StreamCoalescer
+}
+
 export type NotificationContext = {
   readonly sender: TelegramSender
   readonly codex: CodexClient
   readonly threadToChats: ReadonlyMap<string, ReadonlySet<number>>
   readonly turnProgress: Map<string, TurnProgress>
   readonly lastForwardedTurn: Map<string, string>
+  readonly streaming: Map<string, StreamingState>
   readonly stopTyping: (chatId: number) => void
   readonly readLatestReply: (threadId: string) => Promise<string>
+  readonly streamingConfig?: {
+    readonly editIntervalMs?: number
+    readonly minChars?: number
+    readonly maxChars?: number
+    readonly idleMs?: number
+  }
 }
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -138,6 +153,67 @@ async function onItemCompleted(threadId: string, params: unknown, ctx: Notificat
   }
 }
 
+// ---------------------------------------------------------------------------
+// Streaming delta handlers
+// ---------------------------------------------------------------------------
+
+function getOrCreateStreaming(threadId: string, ctx: NotificationContext): StreamingState | null {
+  const existing = ctx.streaming.get(threadId)
+  if (existing) return existing
+
+  const chatIds = ctx.threadToChats.get(threadId)
+  if (!chatIds?.size) {
+    console.log(`[stream] no chatIds for thread=${threadId.slice(0, 8)}, threadToChats keys: [${[...ctx.threadToChats.keys()].map(k => k.slice(0, 8)).join(', ')}]`)
+    return null
+  }
+  const chatId = chatIds.values().next().value!
+
+  // If there's a progress message (tool steps), let the editor reuse it
+  const progress = ctx.turnProgress.get(threadId)
+
+  const cfg = ctx.streamingConfig
+  const editor = new EditStreamEditor(ctx.sender, chatId, {
+    editIntervalMs: cfg?.editIntervalMs ?? 2000,
+    maxEditLength: 4000,
+    maxEditFailures: 3,
+  })
+
+  if (progress) {
+    editor.reuseMessage(progress.messageId)
+    ctx.turnProgress.delete(threadId)
+  }
+
+  const coalescer = new StreamCoalescer(
+    { minChars: cfg?.minChars ?? 20, maxChars: cfg?.maxChars ?? 2000, idleMs: cfg?.idleMs ?? 300 },
+    (text) => editor.appendText(text),
+  )
+
+  const state: StreamingState = { editor, coalescer }
+  ctx.streaming.set(threadId, state)
+  return state
+}
+
+async function onAgentMessageDelta(threadId: string, params: unknown, ctx: NotificationContext): Promise<void> {
+  if (!threadId) return
+  const p = asRecord(params)
+  const delta = typeof p?.delta === 'string' ? p.delta : ''
+  if (!delta) return
+
+  const s = getOrCreateStreaming(threadId, ctx)
+  if (!s) return
+  await s.coalescer.feed(delta)
+}
+
+async function onReasoningDelta(threadId: string, ctx: NotificationContext): Promise<void> {
+  if (!threadId) return
+  const s = getOrCreateStreaming(threadId, ctx)
+  if (s) await s.editor.appendTool('Thinking')
+}
+
+// ---------------------------------------------------------------------------
+// Turn completed — finalize streaming or fallback to full read
+// ---------------------------------------------------------------------------
+
 async function onTurnCompleted(threadId: string, params: unknown, ctx: NotificationContext): Promise<void> {
   if (!threadId) return
   const chatIds = ctx.threadToChats.get(threadId)
@@ -149,6 +225,23 @@ async function onTurnCompleted(threadId: string, params: unknown, ctx: Notificat
 
   for (const chatId of chatIds) ctx.stopTyping(chatId)
 
+  // Finalize streaming if active
+  const streaming = ctx.streaming.get(threadId)
+  if (streaming) {
+    console.log(`[stream] finalizing: fullText=${streaming.editor.fullText.length} chars`)
+    await streaming.coalescer.flush()
+    streaming.coalescer.destroy()
+    await streaming.editor.finalize()
+    ctx.streaming.delete(threadId)
+    // If editor had content, we're done — streaming delivered the text
+    if (streaming.editor.hasContent) {
+      ctx.turnProgress.delete(threadId)
+      if (turnId) ctx.lastForwardedTurn.set(threadId, turnId)
+      return
+    }
+  }
+
+  // Fallback: no streaming content → read full reply (same as before)
   const raw = await ctx.readLatestReply(threadId)
   const progress = ctx.turnProgress.get(threadId)
   ctx.turnProgress.delete(threadId)
@@ -156,12 +249,18 @@ async function onTurnCompleted(threadId: string, params: unknown, ctx: Notificat
   if (!raw) return
 
   const html = markdownToTelegramHtml(raw)
+  const segments = splitTelegramMessage(html)
 
   if (progress) {
-    await ctx.sender.editMessageText(progress.chatId, progress.messageId, html, 'HTML')
+    await ctx.sender.editMessageText(progress.chatId, progress.messageId, segments[0], 'HTML')
+    for (let i = 1; i < segments.length; i++) {
+      await ctx.sender.sendMessage(progress.chatId, segments[i], { parse_mode: 'HTML' })
+    }
   } else {
     for (const chatId of chatIds) {
-      await ctx.sender.sendMessage(chatId, html, { parse_mode: 'HTML' })
+      for (const seg of segments) {
+        await ctx.sender.sendMessage(chatId, seg, { parse_mode: 'HTML' })
+      }
     }
   }
 
@@ -189,12 +288,48 @@ async function onTokenUsage(threadId: string, params: unknown, ctx: Notification
   }
 }
 
+function extractErrorMessage(params: unknown): string {
+  const p = asRecord(params)
+  const error = asRecord(p?.error)
+  if (typeof error?.message === 'string' && error.message.trim()) return error.message.trim()
+  if (typeof p?.message === 'string' && p.message.trim()) return p.message.trim()
+  if (typeof p?.code === 'string' && p.code.trim()) return p.code.trim()
+  if (typeof p?.code === 'number') return `error code ${p.code}`
+  return '本次请求失败，未返回可展示内容。'
+}
+
+async function onError(threadId: string, params: unknown, ctx: NotificationContext): Promise<void> {
+  if (!threadId) return
+  const chatIds = ctx.threadToChats.get(threadId)
+  if (!chatIds?.size) return
+
+  const progress = ctx.turnProgress.get(threadId)
+  ctx.turnProgress.delete(threadId)
+  const message = `错误：${extractErrorMessage(params)}`
+
+  for (const chatId of chatIds) ctx.stopTyping(chatId)
+
+  if (progress) {
+    await ctx.sender.editMessageText(progress.chatId, progress.messageId, message)
+    return
+  }
+  for (const chatId of chatIds) {
+    await ctx.sender.sendMessage(chatId, message)
+  }
+}
+
 export async function handleNotification(
   n: { readonly method: string; readonly params: unknown },
   ctx: NotificationContext,
 ): Promise<void> {
   const threadId = extractThreadId(n)
   switch (n.method) {
+    case 'item/agentMessage/delta':
+      await onAgentMessageDelta(threadId, n.params, ctx)
+      break
+    case 'item/reasoning/summaryTextDelta':
+      await onReasoningDelta(threadId, ctx)
+      break
     case 'item/started':
       await onItemStarted(threadId, n.params, ctx)
       break
@@ -203,6 +338,9 @@ export async function handleNotification(
       break
     case 'turn/completed':
       await onTurnCompleted(threadId, n.params, ctx)
+      break
+    case 'error':
+      await onError(threadId, n.params, ctx)
       break
     case 'thread/tokenUsage/updated':
       await onTokenUsage(threadId, n.params, ctx)

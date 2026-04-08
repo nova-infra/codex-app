@@ -7,33 +7,29 @@ export type StreamEditorConfig = {
   readonly maxEditFailures: number
 }
 
-type EditorState = 'idle' | 'editing' | 'sealed' | 'appending'
-
 type ToolEntry = { readonly name: string; readonly count: number }
 
 const DEFAULTS: StreamEditorConfig = {
   editIntervalMs: 2000,
-  maxEditLength: 4000,
+  maxEditLength: 3800,
   maxEditFailures: 3,
 }
 
-function renderToolIndicators(entries: readonly ToolEntry[]): string {
+function renderToolLine(entries: readonly ToolEntry[]): string {
   if (entries.length === 0) return ''
-  const line = entries
+  return '\n\n' + entries
     .map(e => (e.count > 1 ? `[${e.name}] x${e.count}` : `[${e.name}]`))
     .join(' ')
-  return `\n\n<i>${line}</i>`
 }
 
 export class EditStreamEditor {
   private readonly cfg: StreamEditorConfig
-  private rawParts: readonly string[] = []
   private toolEntries: readonly ToolEntry[] = []
   private activeMessageId: number | null = null
   private lastEditTime = 0
   private editTimer: ReturnType<typeof setTimeout> | null = null
   private failures = 0
-  private state: EditorState = 'idle'
+  private fallen = false
   private fullRawText = ''
 
   constructor(
@@ -44,21 +40,27 @@ export class EditStreamEditor {
     this.cfg = { ...DEFAULTS, ...config }
   }
 
+  /** Reuse an existing message (e.g. the progress indicator). */
+  reuseMessage(messageId: number): void {
+    this.activeMessageId = messageId
+  }
+
+  // -- Public API --
+
   async appendText(text: string): Promise<void> {
     this.fullRawText += text
 
-    if (this.state === 'appending') {
-      const html = markdownToTelegramHtml(text)
-      await this.sender.sendMessage(this.chatId, html, { parse_mode: 'HTML' })
+    if (this.fallen) {
+      // Append mode: just send plain text chunks
+      await this.sender.sendMessage(this.chatId, text)
       return
     }
 
-    this.rawParts = [...this.rawParts, text]
     this.scheduleEdit()
   }
 
   async appendTool(toolName: string): Promise<void> {
-    if (this.state === 'appending') {
+    if (this.fallen) {
       await this.sender.sendMessage(this.chatId, `[${toolName}]`)
       return
     }
@@ -76,27 +78,50 @@ export class EditStreamEditor {
     this.scheduleEdit()
   }
 
+  /**
+   * Finalize: delete the streaming preview, then send the complete
+   * Markdown→HTML formatted message as new message(s).
+   */
   async finalize(): Promise<void> {
     if (this.editTimer !== null) {
       clearTimeout(this.editTimer)
       this.editTimer = null
     }
-    this.toolEntries = []
-    await this.doEdit()
+
+    // Delete the plain-text streaming preview message
+    if (this.activeMessageId !== null && !this.fallen) {
+      try {
+        await this.sender.deleteMessage(this.chatId, this.activeMessageId)
+      } catch {
+        // best effort — if delete fails, the old message stays
+      }
+      this.activeMessageId = null
+    }
+
+    if (!this.fullRawText.trim()) return
+
+    // Send the full formatted version as new message(s)
+    const html = markdownToTelegramHtml(this.fullRawText)
+    const segments = splitTelegramMessage(html)
+    for (const seg of segments) {
+      await this.sender.sendMessage(this.chatId, seg, { parse_mode: 'HTML' })
+    }
   }
 
   get hasContent(): boolean {
-    return this.activeMessageId !== null
+    return this.fullRawText.length > 0
   }
 
   get fullText(): string {
     return this.fullRawText
   }
 
-  private renderActiveHtml(): string {
-    const raw = this.rawParts.join('')
-    const html = markdownToTelegramHtml(raw)
-    return html + renderToolIndicators(this.toolEntries)
+  // -- Internal --
+
+  /** Render preview: plain text with tool indicators (no HTML, no markdown parsing). */
+  private renderPreview(): string {
+    const preview = this.fullRawText.slice(-this.cfg.maxEditLength)
+    return preview + renderToolLine(this.toolEntries)
   }
 
   private scheduleEdit(): void {
@@ -112,27 +137,23 @@ export class EditStreamEditor {
   }
 
   private async doEdit(): Promise<void> {
-    const html = this.renderActiveHtml()
-    if (!html.trim()) return
+    const text = this.renderPreview()
+    if (!text.trim()) return
 
-    if (html.length > this.cfg.maxEditLength) {
-      await this.handleOverflow(html)
-      return
-    }
+    // Truncate to fit TG limit (plain text, no HTML parsing issues)
+    const display = text.length > this.cfg.maxEditLength
+      ? '...' + text.slice(-(this.cfg.maxEditLength - 3))
+      : text
 
     if (this.activeMessageId === null) {
-      this.activeMessageId = await this.sender.sendMessage(
-        this.chatId,
-        html,
-        { parse_mode: 'HTML' },
-      )
+      // First message: send as plain text (no parse_mode)
+      this.activeMessageId = await this.sender.sendMessage(this.chatId, display)
     } else {
       try {
         await this.sender.editMessageText(
           this.chatId,
           this.activeMessageId,
-          html,
-          'HTML',
+          display,
         )
         this.failures = 0
       } catch (err: unknown) {
@@ -140,49 +161,12 @@ export class EditStreamEditor {
         if (!msg.includes('message is not modified')) {
           this.failures++
           if (this.failures >= this.cfg.maxEditFailures) {
-            this.state = 'appending'
+            this.fallen = true
           }
         }
       }
     }
 
-    this.lastEditTime = Date.now()
-  }
-
-  private async handleOverflow(html: string): Promise<void> {
-    const chunks = splitTelegramMessage(html, this.cfg.maxEditLength)
-
-    // Edit current message with first chunk (sealing it)
-    if (this.activeMessageId !== null) {
-      try {
-        await this.sender.editMessageText(
-          this.chatId,
-          this.activeMessageId,
-          chunks[0],
-          'HTML',
-        )
-      } catch {
-        // sealed regardless — ignore errors
-      }
-    } else {
-      this.activeMessageId = await this.sender.sendMessage(
-        this.chatId,
-        chunks[0],
-        { parse_mode: 'HTML' },
-      )
-    }
-
-    // Send remaining chunks; last one becomes the new active message
-    for (let i = 1; i < chunks.length; i++) {
-      this.activeMessageId = await this.sender.sendMessage(
-        this.chatId,
-        chunks[i],
-        { parse_mode: 'HTML' },
-      )
-    }
-
-    // All accumulated raw content has been committed — reset for fresh accumulation
-    this.rawParts = []
     this.lastEditTime = Date.now()
   }
 }

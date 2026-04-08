@@ -41,6 +41,11 @@ export class TelegramSender {
     await this.post('editMessageText', body)
   }
 
+  async deleteMessage(chatId: number, messageId: number): Promise<void> {
+    if (!messageId) return
+    await this.post('deleteMessage', { chat_id: chatId, message_id: messageId })
+  }
+
   async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
     const body: Record<string, unknown> = { callback_query_id: callbackQueryId }
     if (text) body.text = text

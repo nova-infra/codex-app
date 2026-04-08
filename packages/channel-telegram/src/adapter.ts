@@ -7,7 +7,7 @@ import {
   listThreads, sendThreadPicker, sendModelPicker,
   sendReasoningPicker, extractLatestAssistantText,
 } from '@/pickers'
-import { handleNotification, type NotificationContext, type TurnProgress } from '@/notifications'
+import { handleNotification, type NotificationContext, type TurnProgress, type StreamingState } from '@/notifications'
 import {
   sendHelp, sendStatus, handleTokenCommand,
   handleModelCallback, handleReasoningCallback, handleContextCallback,
@@ -29,6 +29,7 @@ export class TelegramAdapter {
   private readonly reasoningByChat = new Map<number, ReasoningEffort | ''>()
   private readonly lastForwardedTurn = new Map<string, string>()
   private readonly turnProgress = new Map<string, TurnProgress>()
+  private readonly streaming = new Map<string, StreamingState>()
   private readonly resumedThreads = new Set<string>()
   private unsubscribe: (() => void) | null = null
 
@@ -68,8 +69,10 @@ export class TelegramAdapter {
       threadToChats: this.threadToChats,
       turnProgress: this.turnProgress,
       lastForwardedTurn: this.lastForwardedTurn,
+      streaming: this.streaming,
       stopTyping: chatId => this.stopTyping(chatId),
       readLatestReply: threadId => this.readLatestReply(threadId),
+      streamingConfig: this.config.streaming,
     }
   }
 
@@ -81,7 +84,9 @@ export class TelegramAdapter {
     void this.restoreThreadMappings().catch(() => {})
     this.unsubscribe?.()
     this.unsubscribe = this.codex.onNotification(n => {
-      void handleNotification(n, this.notifCtx()).catch(() => {})
+      void handleNotification(n, this.notifCtx()).catch(err => {
+        console.error(`[telegram] notification error:`, err)
+      })
     })
     void this.sender.setMyCommands([...BOT_COMMANDS]).catch(() => {})
   }

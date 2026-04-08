@@ -47,7 +47,7 @@ export class StreamCoalescer {
       if (nnIdx !== -1) {
         const head = buf.slice(0, nnIdx + 2)
         this.buffer = buf.slice(nnIdx + 2)
-        await this._emit(head)
+        await this._emit(head, false)
         return
       }
 
@@ -56,7 +56,7 @@ export class StreamCoalescer {
       if (sentIdx !== -1) {
         const head = buf.slice(0, sentIdx + 2)
         this.buffer = buf.slice(sentIdx + 2)
-        await this._emit(head)
+        await this._emit(head, false)
         return
       }
 
@@ -81,10 +81,10 @@ export class StreamCoalescer {
     this._clearIdleTimer()
   }
 
-  private async _emit(text: string): Promise<void> {
+  private async _emit(text: string, clearBuffer = true): Promise<void> {
     if (!text || this._flushing) return
     this._flushing = true
-    this.buffer = ''
+    if (clearBuffer) this.buffer = ''
     try {
       await this.onFlush(text)
     } finally {
