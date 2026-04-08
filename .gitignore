@@ -3,3 +3,5 @@ dist/
 codex-app-server
 *.log
 .DS_Store
+.omx/
+test.txt
