@@ -260,6 +260,23 @@ bun run build
 ./codex-app-server
 ```
 
+### 服务版本查看
+
+- 健康检查：`GET /health`
+- 版本信息：`GET /version`
+
+返回中会包含当前服务版本，例如：
+
+```json
+{
+  "status": "ok",
+  "codex": true,
+  "version": "0.1.0",
+  "gitSha": "dffbe1b",
+  "gitDirty": false
+}
+```
+
 ### 部署注意事项
 
 - **必须提供 `OPENAI_API_KEY`**。否则 `codex app-server` 无法启动，并会报错：
@@ -333,6 +350,19 @@ WantedBy=multi-user.target
 - `never` — 全自动，不弹确认（推荐自用）
 - `auto-edit` — 文件操作自动，命令执行需确认
 - `always` — 所有工具调用都需确认（通过 TG Inline Keyboard 或微信数字菜单）
+
+### 版本怎么维护？
+
+- 这个仓库使用 **Changesets** 做开源项目标准的版本维护
+- 开发者为需要发布的改动提交 changeset：
+
+```bash
+bun run changeset
+```
+
+- 合并到 `main` 后，GitHub Actions 会自动创建或更新版本 PR
+- 版本 PR 合并后，仓库中的包版本和 changelog 会被统一推进
+- 线上服务可通过 `/health` 或 `/version` 看到当前部署版本，方便确认是否已升级
 
 ## 许可证
 

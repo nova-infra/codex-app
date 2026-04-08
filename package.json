@@ -4,6 +4,12 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "dev": "bun run packages/server/src/index.ts",
-    "build": "bun build packages/server/src/index.ts --compile --outfile codex-app-server"
+    "build": "bun build packages/server/src/index.ts --compile --outfile codex-app-server",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release:tag": "changeset tag"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.30.0"
   }
 }

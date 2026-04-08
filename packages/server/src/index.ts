@@ -6,13 +6,19 @@ import {
   NotificationHub,
   type AppConfig,
 } from '@codex-app/core'
+import { execFileSync } from 'node:child_process'
 import { start as startTelegramChannel } from '@codex-app/channel-telegram'
 import { start as startWechatChannel } from '@codex-app/channel-wechat'
+import serverPkg from '../package.json' with { type: 'json' }
 import { WsProxy, type WsData } from './ws/wsProxy'
 
 const { config, created, adminToken } = await bootstrapConfig()
+const serviceVersion = serverPkg.version
+const gitSha = resolveGitSha()
+const gitDirty = resolveGitDirty()
 
 console.log(`[codex-app] Loading config from ~/.codex-app/config.json`)
+console.log(`[codex-app] Version: ${serviceVersion}${gitSha ? ` (${gitSha}${gitDirty ? '-dirty' : ''})` : ''}`)
 console.log(`[codex-app] Port: ${config.port}, Codex port: ${config.codex.port}`)
 
 if (created) {
@@ -56,6 +62,19 @@ const server = Bun.serve<WsData>({
     if (url.pathname === '/health') {
       return new Response(JSON.stringify({
         status: 'ok',
+        codex: codex.isConnected,
+        version: serviceVersion,
+        gitSha,
+        gitDirty,
+      }), { headers: { 'content-type': 'application/json' } })
+    }
+
+    if (url.pathname === '/version') {
+      return new Response(JSON.stringify({
+        name: serverPkg.name,
+        version: serviceVersion,
+        gitSha,
+        gitDirty,
         codex: codex.isConnected,
       }), { headers: { 'content-type': 'application/json' } })
     }
@@ -130,5 +149,31 @@ async function startChannel(pkg: string, start: StartChannelFn, deps: ChannelDep
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[codex-app] Failed to start ${pkg}: ${message}`)
+  }
+}
+
+function resolveGitSha(): string | null {
+  try {
+    const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf-8',
+    }).trim()
+    return sha.length > 0 ? sha : null
+  } catch {
+    return null
+  }
+}
+
+function resolveGitDirty(): boolean {
+  try {
+    const output = execFileSync('git', ['status', '--porcelain'], {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf-8',
+    }).trim()
+    return output.length > 0
+  } catch {
+    return false
   }
 }
