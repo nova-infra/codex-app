@@ -47,6 +47,10 @@ That workflow:
 3. creates or updates a **release/version PR**
 4. updates package versions and changelog entries in that PR
 
+Repository secret requirement:
+
+- `RELEASE_PR_TOKEN` — a token with repository **Contents: Read and write** and **Pull requests: Read and write**
+
 ## Release PR workflow
 
 When the automated version PR appears:
