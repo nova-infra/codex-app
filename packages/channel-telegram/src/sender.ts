@@ -79,6 +79,11 @@ export class TelegramSender {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    return res.json()
+    const json = await res.json()
+    const result = asRecord(json)
+    if (result && result.ok === false) {
+      console.error(`[telegram] API ${method} failed:`, result.description ?? json)
+    }
+    return json
   }
 }

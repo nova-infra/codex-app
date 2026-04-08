@@ -78,6 +78,7 @@ export class TelegramAdapter {
     const text = msg?.text?.trim() ?? ''
     const photo = msg?.photo
     if (!text && !photo?.length) return
+    console.log(`[telegram] Message from ${chatId}: ${text.slice(0, 50)}`)
     await this.dispatch(chatId, text, photo)
   }
 

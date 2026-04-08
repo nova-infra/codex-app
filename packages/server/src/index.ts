@@ -98,6 +98,7 @@ type ChannelDeps = {
   readonly codex: CodexClient
   readonly sessions: SessionManager
   readonly hub: NotificationHub
+  readonly tokenGuard: TokenGuard
 }
 
 type ChannelModule = {
@@ -105,7 +106,7 @@ type ChannelModule = {
 }
 
 async function startChannels(cfg: AppConfig): Promise<void> {
-  const deps: ChannelDeps = { config: cfg, codex, sessions: sessionManager, hub: notificationHub }
+  const deps: ChannelDeps = { config: cfg, codex, sessions: sessionManager, hub: notificationHub, tokenGuard }
 
   if (cfg.telegram?.botToken) {
     await startChannel('@codex-app/channel-telegram', deps)

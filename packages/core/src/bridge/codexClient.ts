@@ -46,8 +46,6 @@ export class CodexClient {
       const args = [
         'app-server',
         '--listen', `ws://127.0.0.1:${this.codexPort}`,
-        '-c', `approval_policy="${this.codexConfig.approvalPolicy}"`,
-        '-c', `sandbox_mode="${this.codexConfig.sandbox}"`,
       ]
 
       this.codexProcess = spawn('codex', args, {

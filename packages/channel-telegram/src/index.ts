@@ -61,7 +61,8 @@ export async function start(deps: {
     botToken: config.telegram.botToken,
     codex,
     tokenGuard,
-    defaultCwd: config.telegram.defaultCwd,
+    config,
   })
   channel.start()
+  console.log(`[telegram] Polling started, bot token: ${config.telegram.botToken.slice(0, 8)}...`)
 }

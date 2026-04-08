@@ -22,6 +22,7 @@ export class TelegramPoller {
     if (this.active) return
     this.active = true
     this.failures = 0
+    console.log(`[telegram] Starting getUpdates polling...`)
     void this.loop(onUpdate)
   }
 
@@ -47,6 +48,7 @@ export class TelegramPoller {
       } catch (err) {
         this.failures++
         this.lastError = err instanceof Error ? err.message : 'polling failed'
+        console.error(`[telegram] Polling error (${this.failures}/${MAX_FAILURES}): ${this.lastError}`)
         if (this.failures > MAX_FAILURES) {
           this.active = false
           break
