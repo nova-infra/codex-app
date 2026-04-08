@@ -9,42 +9,44 @@
 ### 整体数据流
 
 ```
-RN App ──ws──▸ codex-app server ──ws──▸ codex app-server (单实例)
-                     │
-TG Bot ──webhook──▸  │ (同一服务层)
-                     │
-微信 ──iLink──▸      │
+RN App ──ws (局域网)──▸ codex-app server ──ws──▸ codex app-server (单实例)
+                              │
+TG Bot ──long polling──▸      │ (同一服务层)
+                              │
+微信 ──iLink long polling──▸  │
 ```
+
+不需要公网 IP，不需要穿透。RN App 局域网直连，TG 和微信都是主动拉取消息。
 
 ### 分层
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  Transport Layer                     │
-│  ┌────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │ WS Proxy   │  │ TG Webhook   │  │ WX Webhook   │ │
-│  │ (RN App)   │  │              │  │ (iLink)      │ │
-│  └──────┬─────┘  └──────┬───────┘  └──────┬───────┘ │
-│         └───────────┬───┘──────────────────┘         │
-│                     ▼                                │
-│            ┌──────────────┐                          │
-│            │  Token Guard │                          │
-│            └──────┬───────┘                          │
-│                   ▼                                  │
-├─────────────────────────────────────────────────────┤
-│                 Service Layer                        │
-│  ┌──────────────────┐  ┌──────────────────────────┐  │
-│  │ SessionManager   │  │ NotificationHub          │  │
-│  │ (会话生命周期)     │  │ (codex通知 → 路由到终端)  │  │
-│  └────────┬─────────┘  └──────────────────────────┘  │
-├───────────┼─────────────────────────────────────────┤
-│           ▼         Bridge Layer                     │
-│  ┌──────────────────────────────────────────────┐    │
-│  │ CodexClient                                  │    │
-│  │ 连接 codex app-server (ws://127.0.0.1:8766)  │    │
-│  │ JSON-RPC 收发、通知分发                        │    │
-│  └──────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                    Transport Layer                        │
+│  ┌────────────┐  ┌────────────────┐  ┌────────────────┐  │
+│  │ WS Proxy   │  │ TG Polling     │  │ WX iLink       │  │
+│  │ (RN App)   │  │ (getUpdates)   │  │ (getUpdates)   │  │
+│  └──────┬─────┘  └──────┬─────────┘  └──────┬─────────┘  │
+│         └───────────┬───┘───────────────────┘             │
+│                     ▼                                     │
+│            ┌──────────────┐                               │
+│            │  Token Guard │                               │
+│            └──────┬───────┘                               │
+│                   ▼                                       │
+├──────────────────────────────────────────────────────────┤
+│                   Service Layer                           │
+│  ┌──────────────────┐  ┌──────────────────────────┐       │
+│  │ SessionManager   │  │ NotificationHub          │       │
+│  │ (会话生命周期)     │  │ (codex通知 → 路由到终端)  │       │
+│  └────────┬─────────┘  └──────────────────────────┘       │
+├───────────┼──────────────────────────────────────────────┤
+│           ▼         Bridge Layer                          │
+│  ┌──────────────────────────────────────────────┐         │
+│  │ CodexClient                                  │         │
+│  │ 连接 codex app-server (ws://127.0.0.1:8766)  │         │
+│  │ JSON-RPC 收发、通知分发                        │         │
+│  └──────────────────────────────────────────────┘         │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ### 设计原则
@@ -147,10 +149,10 @@ context 使用率 > 80% (通过 thread/tokenUsage/updated 监听)
 ### HTTP（最小化）
 
 ```
-POST /webhook/telegram     ← TG Bot 回调
-POST /webhook/wechat       ← 微信 iLink 回调
 GET  /health               ← 健康检查
 ```
+
+仅此一个 HTTP 端点。TG 和微信都用 long polling（主动拉取），不需要 webhook。
 
 ### WebSocket（核心通道）
 
@@ -162,6 +164,12 @@ RN App 全部走 WebSocket，透传 codex app-server 的 JSON-RPC 协议。serve
 - token 校验 + 用户隔离
 - session-user 归属映射
 - JSON-RPC 透传（加权限过滤）
+
+### TG / 微信通道
+
+不走 HTTP webhook，server 内部主动 polling：
+- **TG**：启动时开始 `getUpdates` long polling，收到消息 → 转为 JSON-RPC 调用 → 结果通过 Bot API 推回
+- **微信**：启动时开始 iLink `getupdates` long polling，收到消息 → 转为 JSON-RPC 调用 → 结果通过 iLink `sendmessage` 推回
 
 ### codex app-server JSON-RPC 方法（参考）
 
@@ -231,26 +239,39 @@ codex-app/
 │   ├── server/                   # @codex-app/server
 │   │   ├── package.json
 │   │   └── src/
-│   │       ├── index.ts          # 入口
+│   │       ├── index.ts          # 入口：HTTP + WS + 启动 polling
 │   │       └── ws/
 │   │           └── wsProxy.ts
 │   │
 │   ├── channel-telegram/         # @codex-app/channel-telegram
 │   │   ├── package.json
 │   │   └── src/
-│   │       ├── webhook.ts
-│   │       ├── sender.ts
-│   │       └── adapter.ts
+│   │       ├── polling.ts        # TG getUpdates long polling
+│   │       ├── sender.ts         # Bot API: sendMessage/editMessageText/inline keyboard
+│   │       └── adapter.ts        # TG 消息 ↔ JSON-RPC 转换
 │   │
 │   └── channel-wechat/           # @codex-app/channel-wechat
 │       ├── package.json
 │       └── src/
-│           ├── webhook.ts
-│           ├── sender.ts
-│           └── adapter.ts
+│           ├── polling.ts        # iLink getupdates long polling
+│           ├── sender.ts         # iLink sendmessage + CDN crypto
+│           └── adapter.ts        # WX 消息 ↔ JSON-RPC 转换
 │
 ├── package.json                  # workspace root
 └── tsconfig.json
+```
+
+### Import 规范
+
+包内使用 `@/` alias 指向 `src/`，避免相对路径：
+
+```typescript
+// 包内引用
+import type { CodexClient } from '@/bridge/codexClient'
+import { SessionStore } from '@/session/sessionStore'
+
+// 跨包引用
+import { CodexClient, SessionManager } from '@codex-app/core'
 ```
 
 ### 包依赖关系
@@ -265,7 +286,7 @@ core 不依赖任何 channel
 ## 启动流程
 
 ```
-./codex-app-server --port 8765
+./codex-app-server --port 8765  (或 bun run dev)
       │
       ▼
 1. 加载配置 (~/.codex-app/config.json)
@@ -281,18 +302,16 @@ core 不依赖任何 channel
       ▼
 4. Bun.serve (port 8765)
    ├── GET  /health
-   ├── POST /webhook/telegram
-   ├── POST /webhook/wechat
    └── WS   /ws?token=xxx
       │
       ▼
-5. 注册 TG webhook (如果配置了)
+5. 启动 TG long polling (如果配置了 telegram.botToken)
       │
       ▼
-6. 启动 WX iLink long-poll (如果配置了)
+6. 启动 WX iLink long polling (如果配置了 wechat.enabled)
       │
       ▼
-✅ Ready
+✅ Ready — 无需公网 IP，无需穿透
 ```
 
 codex app-server 由 codex-app 管理生命周期，单二进制搞定一切。
@@ -315,8 +334,7 @@ codex app-server 由 codex-app 管理生命周期，单二进制搞定一切。
     { "token": "test-01", "label": "测试用" }
   ],
   "telegram": {
-    "botToken": "123456:ABC...",
-    "webhookUrl": "https://your-domain/webhook/telegram"
+    "botToken": "123456:ABC..."
   },
   "wechat": {
     "enabled": true
@@ -339,6 +357,7 @@ codex app-server 由 codex-app 管理生命周期，单二进制搞定一切。
 - 不可变数据: 禁止 mutation
 - 文件上限: 400 行，函数上限: 50 行
 - 错误处理: 显式处理，不吞异常
+- Import: 包内用 `@/` alias，跨包用 `@codex-app/*`
 - 提交格式: `<type>: <description>` (feat/fix/refactor/docs/chore)
 
 ## 技术选型
@@ -350,8 +369,8 @@ codex app-server 由 codex-app 管理生命周期，单二进制搞定一切。
 | HTTP/WS | Bun.serve (原生) |
 | Codex 桥接 | codex app-server (WebSocket JSON-RPC) |
 | 持久化 | JSON 文件 (~/.codex-app/) |
-| TG Bot | Telegram Bot API (webhook + sendMessage/editMessageText) |
-| 微信 | iLink Bot HTTP Protocol (long-poll + sendmessage) |
+| TG Bot | Telegram Bot API (long polling + sendMessage/editMessageText) |
+| 微信 | iLink Bot HTTP Protocol (long polling + sendmessage) |
 | 部署 | bun build --compile → 单文件二进制 |
 
 ## 可复用代码索引
@@ -384,7 +403,7 @@ codex app-server 由 codex-app 管理生命周期，单二进制搞定一切。
 
 | 源文件 | 行数 | 用途 | 复用级别 |
 |--------|------|------|---------|
-| `messaging/TelegramBridge.ts` | 968 | TG 完整实现：polling、chat↔thread 映射、inline keyboard、model 选择、流式输出 | adapt (polling→webhook) |
+| `messaging/TelegramBridge.ts` | 968 | TG 完整实现：long polling、chat↔thread 映射、inline keyboard、model 选择、流式输出 | copy (已是 polling 模式) |
 
 ### @codex-app/channel-wechat
 
@@ -400,5 +419,5 @@ codex app-server 由 codex-app 管理生命周期，单二进制搞定一切。
 ### 复用级别说明
 
 - **copy** — 可直接复制使用，仅改 import 路径
-- **adapt** — 核心逻辑可用，需要修改传输方式或接口适配（如 stdio→ws、polling→webhook）
+- **adapt** — 核心逻辑可用，需要修改传输方式或接口适配
 - **reference** — 参考模式和实现思路，不直接复制

@@ -53,20 +53,6 @@ const server = Bun.serve({
       return undefined
     }
 
-    // Telegram webhook
-    if (url.pathname === '/webhook/telegram' && req.method === 'POST') {
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { 'content-type': 'application/json' },
-      })
-    }
-
-    // WeChat webhook
-    if (url.pathname === '/webhook/wechat' && req.method === 'POST') {
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { 'content-type': 'application/json' },
-      })
-    }
-
     return new Response('Not Found', { status: 404 })
   },
 

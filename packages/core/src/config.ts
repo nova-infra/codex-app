@@ -9,7 +9,6 @@ export type TokenEntry = {
 
 export type TelegramConfig = {
   readonly botToken: string
-  readonly webhookUrl: string
 }
 
 export type WechatConfig = {
