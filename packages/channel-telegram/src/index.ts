@@ -1,4 +1,4 @@
-import type { CodexClient } from '@codex-app/core'
+import type { CodexClient, AppConfig } from '@codex-app/core'
 import type { TokenGuard } from '@codex-app/core'
 import { TelegramPoller } from '@/polling'
 import { TelegramSender } from '@/sender'
@@ -8,6 +8,7 @@ export type TelegramChannelOptions = {
   readonly botToken: string
   readonly codex: CodexClient
   readonly tokenGuard: TokenGuard
+  readonly config: AppConfig
   readonly defaultCwd?: string
 }
 
@@ -18,7 +19,7 @@ export class TelegramChannel {
 
   constructor(opts: TelegramChannelOptions) {
     this.sender = new TelegramSender(opts.botToken)
-    this.adapter = new TelegramAdapter(opts.codex, this.sender, opts.tokenGuard)
+    this.adapter = new TelegramAdapter(opts.codex, this.sender, opts.tokenGuard, opts.config)
     this.poller = new TelegramPoller(opts.botToken)
     if (opts.defaultCwd) {
       this.adapter.defaultCwd = opts.defaultCwd
@@ -48,3 +49,19 @@ export type { TelegramUpdate } from '@/types'
 export { TelegramPoller } from '@/polling'
 export { TelegramSender } from '@/sender'
 export { TelegramAdapter } from '@/adapter'
+
+export async function start(deps: {
+  readonly codex: CodexClient
+  readonly tokenGuard: TokenGuard
+  readonly config: AppConfig
+}): Promise<void> {
+  const { config, codex, tokenGuard } = deps
+  if (!config.telegram?.botToken) return
+  const channel = new TelegramChannel({
+    botToken: config.telegram.botToken,
+    codex,
+    tokenGuard,
+    defaultCwd: config.telegram.defaultCwd,
+  })
+  channel.start()
+}

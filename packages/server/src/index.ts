@@ -1,5 +1,5 @@
 import {
-  loadConfig,
+  bootstrapConfig,
   CodexClient,
   TokenGuard,
   SessionManager,
@@ -8,11 +8,20 @@ import {
 } from '@codex-app/core'
 import { WsProxy, type WsData } from './ws/wsProxy'
 
-const config = loadConfig()
+const { config, created, adminToken } = bootstrapConfig()
 
 console.log(`[codex-app] Loading config from ~/.codex-app/config.json`)
 console.log(`[codex-app] Port: ${config.port}, Codex port: ${config.codex.port}`)
-console.log(`[codex-app] Tokens: ${config.tokens.map(t => t.label ?? t.token).join(', ') || '(none)'}`)
+
+if (created) {
+  console.log(`[codex-app] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
+  console.log(`[codex-app]   首次启动，已自动创建管理员`)
+  console.log(`[codex-app]   用户: admin`)
+  console.log(`[codex-app]   Token: ${adminToken}`)
+  console.log(`[codex-app] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
+} else {
+  console.log(`[codex-app] Users: ${config.users.map(u => u.name).join(', ') || '(none)'}`)
+}
 
 // Auth
 const tokenGuard = new TokenGuard(config.users, config.tokens)

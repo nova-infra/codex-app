@@ -106,6 +106,13 @@ export class WechatAdapter {
 
     const userId = await resolveUserId(this.dataDir, chatId)
     if (!userId) {
+      // Single user: auto-bind without asking
+      if (this.config.users.length === 1) {
+        await saveChannelBinding(this.dataDir, chatId, this.config.users[0].id)
+        const name = this.config.users[0].name
+        await this.sendRaw(chatId, `已自动绑定用户 ${name}，发消息开始使用 Codex。`)
+        return
+      }
       this.pendingTokenBind.add(chatId)
       await this.sendRaw(chatId, '欢迎使用 Codex！请发送你的 token 完成绑定：')
       return

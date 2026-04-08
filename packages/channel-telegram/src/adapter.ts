@@ -1,4 +1,4 @@
-import type { CodexClient } from '@codex-app/core'
+import { type CodexClient, type AppConfig, addUser, revokeToken, listUsers, loadConfig } from '@codex-app/core'
 import type { TokenGuard } from '@codex-app/core'
 import type { TelegramUpdate, ReasoningEffort } from '@/types'
 import { REASONING_EFFORTS, BOT_COMMANDS } from '@/types'
@@ -45,11 +45,16 @@ export class TelegramAdapter {
 
   defaultCwd = process.cwd()
 
+  private config: AppConfig
+
   constructor(
     private readonly codex: CodexClient,
     private readonly sender: TelegramSender,
     private readonly tokenGuard: TokenGuard,
-  ) {}
+    config: AppConfig,
+  ) {
+    this.config = config
+  }
 
   start(): void {
     this.unsubscribe?.()
@@ -82,6 +87,12 @@ export class TelegramAdapter {
     if (this.awaitingToken.has(chatId)) { await this.handleTokenInput(chatId, text); return }
     const bound = findBinding('telegram', String(chatId))
     if (!bound) {
+      // Single user: auto-bind without asking
+      if (this.config.users.length === 1) {
+        saveBinding({ type: 'telegram', externalId: String(chatId), userId: this.config.users[0].id })
+        await this.sender.sendMessage(chatId, `已自动绑定用户 ${this.config.users[0].name}，发送 /help 查看可用命令。`)
+        return
+      }
       this.awaitingToken.add(chatId)
       await this.sender.sendMessage(chatId, '欢迎！请发送你的 token 完成绑定。')
       return
@@ -92,6 +103,7 @@ export class TelegramAdapter {
     if (text === '/status') { await this.sendStatus(chatId); return }
     if (text === '/model') { await sendModelPicker(chatId, this.codex, this.sender); return }
     if (text === '/reasoning') { await sendReasoningPicker(chatId, this.sender); return }
+    if (text.startsWith('/token')) { await this.handleTokenCommand(chatId, text, bound.userId); return }
     const projectMatch = text.match(/^\/project\s+(\S+)$/)
     if (projectMatch) {
       this.defaultCwd = projectMatch[1]!
@@ -363,6 +375,66 @@ export class TelegramAdapter {
     await this.sender.sendMessage(chatId, lines.join('\n'))
   }
 
+  private isAdmin(userId: string): boolean {
+    return this.config.users.length > 0 && this.config.users[0].id === userId
+  }
+
+  private async handleTokenCommand(chatId: number, text: string, userId: string): Promise<void> {
+    if (!this.isAdmin(userId)) {
+      await this.sender.sendMessage(chatId, '仅管理员可执行 /token 命令。')
+      return
+    }
+
+    const parts = text.split(/\s+/)
+    const sub = parts[1] ?? ''
+
+    if (sub === 'create') {
+      const name = parts.slice(2).join(' ').trim() || `user-${Date.now().toString(36)}`
+      const result = addUser(this.config, name)
+      this.config = result.config
+      await this.sender.sendMessage(chatId, [
+        `✅ 用户已创建`,
+        `名称: ${name}`,
+        `Token: \`${result.token}\``,
+        '',
+        '将此 token 发送给对方即可绑定。',
+      ].join('\n'), { parse_mode: 'Markdown' })
+      return
+    }
+
+    if (sub === 'list') {
+      const fresh = loadConfig()
+      const entries = listUsers(fresh)
+      if (entries.length === 0) { await this.sender.sendMessage(chatId, '暂无用户。'); return }
+      const lines = entries.map(e => {
+        const tokens = e.tokens.map(t => `  - ${t.token.slice(0, 8)}... (${t.label ?? ''})`).join('\n')
+        return `👤 ${e.user.name} (${e.user.id})\n${tokens || '  (无 token)'}`
+      })
+      await this.sender.sendMessage(chatId, lines.join('\n\n'))
+      return
+    }
+
+    if (sub === 'revoke') {
+      const token = parts[2]?.trim()
+      if (!token) { await this.sender.sendMessage(chatId, '用法: /token revoke <token>'); return }
+      const result = revokeToken(this.config, token)
+      if (!result) { await this.sender.sendMessage(chatId, 'Token 不存在。'); return }
+      this.config = result
+      await this.sender.sendMessage(chatId, `✅ Token ${token.slice(0, 8)}... 已吊销。`)
+      return
+    }
+
+    // /token (no subcommand) — show current user's tokens
+    const fresh = loadConfig()
+    const myTokens = fresh.tokens.filter(t => t.userId === userId)
+    if (myTokens.length === 0) {
+      await this.sender.sendMessage(chatId, '当前无 token。')
+    } else {
+      const lines = myTokens.map(t => `\`${t.token}\` (${t.label ?? ''})`)
+      await this.sender.sendMessage(chatId, `你的 Token:\n${lines.join('\n')}`, { parse_mode: 'Markdown' })
+    }
+  }
+
   private async sendHelp(chatId: number): Promise<void> {
     await this.sender.sendMessage(chatId, [
       '/new - 新建会话',
@@ -371,6 +443,7 @@ export class TelegramAdapter {
       '/model - 选择模型',
       '/reasoning - 选择推理深度',
       '/status - 查看状态',
+      '/token - 管理 Token（管理员）',
       '/help - 查看命令说明',
     ].join('\n'))
   }

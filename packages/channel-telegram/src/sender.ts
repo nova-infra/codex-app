@@ -11,11 +11,20 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 export class TelegramSender {
   constructor(private readonly token: string) {}
 
-  async sendMessage(chatId: number, text: string, keyboard?: InlineKeyboard): Promise<number> {
+  async sendMessage(
+    chatId: number,
+    text: string,
+    opts?: InlineKeyboard | { parse_mode?: string; reply_markup?: InlineKeyboard },
+  ): Promise<number> {
     const trimmed = text.trim()
     if (!trimmed) return 0
     const body: Record<string, unknown> = { chat_id: chatId, text: trimmed }
-    if (keyboard) body.reply_markup = keyboard
+    if (opts && 'inline_keyboard' in opts) {
+      body.reply_markup = opts
+    } else if (opts) {
+      if (opts.parse_mode) body.parse_mode = opts.parse_mode
+      if (opts.reply_markup) body.reply_markup = opts.reply_markup
+    }
     const data = asRecord(await this.post('sendMessage', body))
     const result = asRecord(data?.result)
     return typeof result?.message_id === 'number' ? result.message_id : 0

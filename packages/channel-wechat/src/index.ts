@@ -55,3 +55,11 @@ export { ILinkClient } from '@/iLinkClient'
 export { WechatSender } from '@/sender'
 export { WechatAdapter } from '@/adapter'
 export { ILinkPoller } from '@/polling'
+
+export async function start(deps: {
+  readonly codex: CodexClient
+  readonly config: AppConfig
+}): Promise<void> {
+  const channel = new WechatChannel(deps.codex, deps.config)
+  await channel.start()
+}
