@@ -268,7 +268,7 @@ export class TelegramAdapter {
       case 'webSearch':
         return `${icon} 搜索网页`
       case 'reasoning':
-        return `${icon} 思考中...`
+        return `${icon} Thinking...`
       case 'plan':
         return `${icon} 制定计划`
       default:
