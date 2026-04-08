@@ -71,19 +71,101 @@ import { CodexClient, SessionManager } from '@codex-app/core'
 
 类型: feat, fix, refactor, docs, chore
 
-## 运行
+## 快速开始
 
-```bash
-# 开发
-bun run dev
+### 1. 配置
 
-# 编译二进制
-bun run build
+编辑 `~/.codex-app/config.json`：
+
+```json
+{
+  "port": 8765,
+  "codex": {
+    "port": 8766,
+    "model": "o3",
+    "approvalPolicy": "never",
+    "sandbox": "danger-full-access"
+  },
+  "users": [
+    { "id": "u1", "name": "主力" }
+  ],
+  "tokens": [
+    { "token": "my-main", "userId": "u1", "label": "调试" }
+  ],
+  "telegram": {
+    "botToken": "你的TG Bot Token（可选）"
+  },
+  "wechat": {
+    "enabled": true
+  }
+}
 ```
 
-## 配置
+配置说明：
+- `users` — 用户列表，id 是稳定标识
+- `tokens` — 认证凭证，userId 指向 users.id，可为同一用户创建多个
+- `telegram.botToken` — 不配则不启动 TG channel
+- `wechat.enabled` — 不配或 false 则不启动微信 channel
 
-`~/.codex-app/config.json`，运行时数据也在 `~/.codex-app/` 下。
+运行时数据（sessions.json、channels.json）也存储在 `~/.codex-app/` 下。
+
+### 2. 启动
+
+```bash
+# 安装依赖
+bun install
+
+# 开发模式（直接跑，不需要 build）
+bun run dev
+
+# 编译为单文件二进制
+bun run build
+./codex-app-server
+```
+
+启动成功输出：
+```
+[codex-app] Loading config from ~/.codex-app/config.json
+[codex-app] Port: 8765, Codex port: 8766
+[codex-app] Codex app-server connected
+[codex-app] Ready at http://localhost:8765
+[codex-app] WebSocket: ws://localhost:8765/ws?token=<your-token>
+```
+
+### 3. 验证
+
+```bash
+# 健康检查
+curl http://localhost:8765/health
+
+# WebSocket 连接测试（需安装 websocat: brew install websocat）
+websocat ws://localhost:8765/ws?token=my-main
+
+# 连上后发 JSON-RPC 列出会话
+{"jsonrpc":"2.0","id":1,"method":"thread/list","params":{}}
+
+# 创建会话（指定项目目录）
+{"jsonrpc":"2.0","id":2,"method":"thread/start","params":{"cwd":"/path/to/project"}}
+
+# 发消息
+{"jsonrpc":"2.0","id":3,"method":"turn/start","params":{"threadId":"xxx","input":[{"role":"user","content":"hello"}]}}
+```
+
+### 4. Telegram 调试
+
+1. 从 @BotFather 创建 Bot，获取 token
+2. 填入 config.json 的 `telegram.botToken`
+3. `bun run dev` 启动
+4. 在 TG 给 Bot 发消息，首次会要求输入 token 绑定
+5. 绑定后即可对话，支持 inline keyboard、流式输出
+
+### 5. 微信调试
+
+1. config.json 设置 `"wechat": { "enabled": true }`
+2. `bun run dev` 启动
+3. 终端会打印 QR 码 URL，用微信扫码登录
+4. 首次发消息需输入 token 绑定
+5. 绑定后即可对话（纯文本模式）
 
 ## 复用代码须知
 
