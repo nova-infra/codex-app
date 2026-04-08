@@ -59,19 +59,25 @@ TG Bot ──long polling──▸      │ (同一服务层)
 
 ## 用户与认证
 
-### Token = User
+### User + Token 分离
 
 ```
-Token (= User)
-──────────────
-token:      string (手动指定，如 "my-main", "test-01")
-label?:     string (可选备注)
+User {
+  id:     string    ← 稳定标识，永远不变
+  name:   string
+}
+
+Token {
+  token:  string    ← 凭证，可轮换、可多个
+  userId: string    ← 指向 User.id
+  label:  string
+}
 ```
 
-- 每个 token 是独立用户，会话相互隔离
-- token 在 config.json 中手动指定，无注册接口
-- RN App 连接时通过 `?token=xxx` 认证
-- 一个 token 可绑定任意数量的 TG/WX 账号，共享会话
+- User 是稳定身份，所有 session/channel 绑定都关联 userId
+- Token 是认证凭证，可轮换、可为同一用户创建多个
+- 换 token 不影响 session 和 channel 绑定
+- config.json 中手动配置，无注册接口
 
 ### Channel 绑定
 
@@ -81,15 +87,15 @@ label?:     string (可选备注)
 ChannelBinding {
   type:       "telegram" | "wechat"
   externalId: string  (tg chat_id / wx openid)
-  token:      string  (归属哪个用户)
+  userId:     string  (归属用户，不绑 token)
 }
 ```
 
 绑定流程（TG/WX 首次使用时）：
 1. 用户首次发消息 → 未绑定
 2. Bot 回复："请发送你的 token 完成绑定"
-3. 用户发送 token → 校验存在 → 写入 channels.json
-4. 后续消息通过 externalId 查到 token → 共享该 token 下所有会话
+3. 用户发送 token → 校验存在 → 查到 userId → 写入 channels.json
+4. 后续消息通过 externalId 查到 userId → 共享该用户所有会话
 
 ## 会话生命周期
 
@@ -334,9 +340,14 @@ codex app-server 由 codex-app 管理生命周期，单二进制搞定一切。
     "approvalPolicy": "never",
     "sandbox": "danger-full-access"
   },
+  "users": [
+    { "id": "u1", "name": "主力" },
+    { "id": "u2", "name": "测试" }
+  ],
   "tokens": [
-    { "token": "my-main", "label": "主力" },
-    { "token": "test-01", "label": "测试用" }
+    { "token": "my-main", "userId": "u1", "label": "RN App" },
+    { "token": "my-api",  "userId": "u1", "label": "API 调试" },
+    { "token": "test-01", "userId": "u2", "label": "测试用" }
   ],
   "telegram": {
     "botToken": "123456:ABC..."

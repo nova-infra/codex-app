@@ -10,7 +10,7 @@ export class SessionManager {
 
   constructor(private readonly codex: CodexClient) {}
 
-  async startSession(token: string, projectDir: string, model?: string): Promise<SessionMeta> {
+  async startSession(userId: string, projectDir: string, model?: string): Promise<SessionMeta> {
     const result = await this.codex.call('thread/start', {
       cwd: projectDir,
       ...(model ? { model } : {}),
@@ -18,7 +18,7 @@ export class SessionManager {
 
     const meta: SessionMeta = {
       sessionId: result.threadId,
-      token,
+      userId,
       projectDir,
       createdAt: new Date().toISOString(),
       lastActiveAt: new Date().toISOString(),
@@ -36,20 +36,20 @@ export class SessionManager {
     this.store.updateLastActive(sessionId)
   }
 
-  async getOrCreateSession(token: string, projectDir: string): Promise<SessionMeta> {
-    const latest = this.store.findLatest(token, projectDir)
+  async getOrCreateSession(userId: string, projectDir: string): Promise<SessionMeta> {
+    const latest = this.store.findLatest(userId, projectDir)
     if (latest) {
       await this.resumeSession(latest.sessionId, projectDir)
       return latest
     }
-    return this.startSession(token, projectDir)
+    return this.startSession(userId, projectDir)
   }
 
-  listSessions(token: string, projectDir?: string): readonly SessionMeta[] {
+  listSessions(userId: string, projectDir?: string): readonly SessionMeta[] {
     if (projectDir) {
-      return this.store.findByProject(token, projectDir)
+      return this.store.findByProject(userId, projectDir)
     }
-    return this.store.findByToken(token)
+    return this.store.findByUser(userId)
   }
 
   async archiveSession(sessionId: string): Promise<void> {

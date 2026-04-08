@@ -4,7 +4,7 @@ import { getConfigDir } from '@/config'
 
 export type SessionMeta = {
   readonly sessionId: string
-  readonly token: string
+  readonly userId: string
   readonly projectDir: string
   readonly alias?: string
   readonly createdAt: string
@@ -35,18 +35,18 @@ export class SessionStore {
     writeSessions([...filtered, meta])
   }
 
-  findByToken(token: string): readonly SessionMeta[] {
-    return readSessions().filter(s => s.token === token)
+  findByUser(userId: string): readonly SessionMeta[] {
+    return readSessions().filter(s => s.userId === userId)
   }
 
-  findByProject(token: string, projectDir: string): readonly SessionMeta[] {
+  findByProject(userId: string, projectDir: string): readonly SessionMeta[] {
     return readSessions().filter(
-      s => s.token === token && s.projectDir === projectDir
+      s => s.userId === userId && s.projectDir === projectDir
     )
   }
 
-  findLatest(token: string, projectDir: string): SessionMeta | null {
-    const sessions = this.findByProject(token, projectDir)
+  findLatest(userId: string, projectDir: string): SessionMeta | null {
+    const sessions = this.findByProject(userId, projectDir)
     if (sessions.length === 0) return null
     return [...sessions].sort(
       (a, b) => new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime()

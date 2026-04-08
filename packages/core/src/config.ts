@@ -2,8 +2,14 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 
+export type UserEntry = {
+  readonly id: string
+  readonly name: string
+}
+
 export type TokenEntry = {
   readonly token: string
+  readonly userId: string
   readonly label?: string
 }
 
@@ -25,6 +31,7 @@ export type CodexConfig = {
 export type AppConfig = {
   readonly port: number
   readonly codex: CodexConfig
+  readonly users: readonly UserEntry[]
   readonly tokens: readonly TokenEntry[]
   readonly telegram?: TelegramConfig
   readonly wechat?: WechatConfig
@@ -41,6 +48,7 @@ const DEFAULT_CONFIG: AppConfig = {
     approvalPolicy: 'never',
     sandbox: 'danger-full-access',
   },
+  users: [],
   tokens: [],
 }
 

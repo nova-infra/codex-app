@@ -7,7 +7,7 @@ console.log(`[codex-app] Port: ${config.port}, Codex port: ${config.codex.port}`
 console.log(`[codex-app] Tokens: ${config.tokens.map(t => t.label ?? t.token).join(', ') || '(none)'}`)
 
 // Auth
-const tokenGuard = new TokenGuard(config.tokens)
+const tokenGuard = new TokenGuard(config.users, config.tokens)
 
 // Bridge
 const codex = new CodexClient(config.codex.port, {
@@ -46,7 +46,7 @@ const server = Bun.serve({
       if (!user) {
         return new Response('Unauthorized', { status: 401 })
       }
-      const upgraded = server.upgrade(req, { data: { token: user.token, label: user.label } })
+      const upgraded = server.upgrade(req, { data: { userId: user.userId, userName: user.userName, tokenLabel: user.tokenLabel } })
       if (!upgraded) {
         return new Response('WebSocket upgrade failed', { status: 500 })
       }
@@ -58,16 +58,15 @@ const server = Bun.serve({
 
   websocket: {
     open(ws) {
-      const { token, label } = ws.data as { token: string; label?: string }
-      console.log(`[ws] Connected: ${label ?? token}`)
+      const { userId, userName } = ws.data as { userId: string; userName: string; tokenLabel?: string }
+      console.log(`[ws] Connected: ${userName} (${userId})`)
     },
 
     message(ws, raw) {
-      // TODO: JSON-RPC proxy to codex
-      const { token } = ws.data as { token: string }
+      const { userId } = ws.data as { userId: string }
       try {
         const msg = JSON.parse(typeof raw === 'string' ? raw : raw.toString())
-        console.log(`[ws] ${token} → ${msg.method ?? 'unknown'}`)
+        console.log(`[ws] ${userId} → ${msg.method ?? 'unknown'}`)
 
         // Forward to codex
         codex.call(msg.method, msg.params).then((result) => {
@@ -85,8 +84,8 @@ const server = Bun.serve({
     },
 
     close(ws) {
-      const { token, label } = ws.data as { token: string; label?: string }
-      console.log(`[ws] Disconnected: ${label ?? token}`)
+      const { userId, userName } = ws.data as { userId: string; userName: string }
+      console.log(`[ws] Disconnected: ${userName} (${userId})`)
     },
   },
 })
