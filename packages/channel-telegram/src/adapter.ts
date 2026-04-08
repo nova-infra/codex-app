@@ -2,22 +2,14 @@ import { type CodexClient, type AppConfig, addUser, revokeToken, listUsers, load
 import type { TokenGuard } from '@codex-app/core'
 import type { TelegramUpdate, ReasoningEffort } from '@/types'
 import { REASONING_EFFORTS, BOT_COMMANDS } from '@/types'
-import { TelegramSender, EDIT_INTERVAL_MS } from '@/sender'
-import { findBinding, saveBinding } from '@/channelStore'
+import { TelegramSender } from '@/sender'
+import { findBinding, saveBinding, loadThreadMappings, saveThreadMapping } from '@/channelStore'
 import {
   listThreads, sendThreadPicker, sendModelPicker,
   sendReasoningPicker, extractLatestAssistantText,
 } from '@/pickers'
 
 type Notification = { readonly method: string; readonly params: unknown }
-
-type StreamState = {
-  readonly chatId: number
-  readonly messageId: number
-  readonly buffer: string
-  readonly lastEditAt: number
-  readonly timer: ReturnType<typeof setTimeout> | null
-}
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
@@ -40,7 +32,7 @@ export class TelegramAdapter {
   private readonly typingTimers = new Map<number, ReturnType<typeof setInterval>>()
   private readonly modelByChat = new Map<number, string>()
   private readonly reasoningByChat = new Map<number, ReasoningEffort | ''>()
-  private readonly streamByThread = new Map<string, StreamState>()
+  private readonly lastForwardedTurn = new Map<string, string>()
   private unsubscribe: (() => void) | null = null
 
   defaultCwd = process.cwd()
@@ -57,6 +49,7 @@ export class TelegramAdapter {
   }
 
   start(): void {
+    this.restoreThreadMappings()
     this.unsubscribe?.()
     this.unsubscribe = this.codex.onNotification(n => {
       void this.onNotification(n).catch(() => {})
@@ -205,68 +198,42 @@ export class TelegramAdapter {
   }
 
   private async onNotification(n: Notification): Promise<void> {
-    const threadId = extractThreadId(n)
-    switch (n.method) {
-      case 'turn/started': await this.onTurnStarted(threadId); break
-      case 'item/agentMessage/delta': await this.onDelta(threadId, n.params); break
-      case 'turn/completed': await this.onTurnCompleted(threadId); break
-      case 'thread/tokenUsage/updated': await this.onTokenUsage(threadId, n.params); break
+    if (n.method === 'turn/completed') {
+      const threadId = extractThreadId(n)
+      console.log(`[telegram] turn/completed thread=${threadId.slice(0, 8)}`)
+      await this.onTurnCompleted(threadId, n.params)
+    } else if (n.method === 'thread/tokenUsage/updated') {
+      await this.onTokenUsage(extractThreadId(n), n.params)
     }
   }
 
-  private async onTurnStarted(threadId: string): Promise<void> {
+  private extractTurnId(params: unknown): string {
+    const p = asRecord(params)
+    const turn = asRecord(p?.turn)
+    return typeof turn?.id === 'string' ? turn.id : ''
+  }
+
+  private async onTurnCompleted(threadId: string, params: unknown): Promise<void> {
     if (!threadId) return
     const chatIds = this.threadToChats.get(threadId)
     if (!chatIds?.size) return
+
+    const turnId = this.extractTurnId(params)
+    const lastTurnId = this.lastForwardedTurn.get(threadId)
+    if (turnId && lastTurnId === turnId) return
+
     for (const chatId of chatIds) {
       this.stopTyping(chatId)
-      const msgId = await this.sender.sendMessage(chatId, '...')
-      if (msgId) {
-        this.streamByThread.set(threadId, { chatId, messageId: msgId, buffer: '', lastEditAt: 0, timer: null })
-      }
     }
-  }
 
-  private async onDelta(threadId: string, params: unknown): Promise<void> {
-    if (!threadId) return
-    const state = this.streamByThread.get(threadId)
-    if (!state) return
-    const p = asRecord(params)
-    const delta = typeof p?.delta === 'string' ? p.delta : (typeof asRecord(p?.item)?.delta === 'string' ? String(asRecord(p?.item)!.delta) : '')
-    if (!delta) return
-    const buffer = state.buffer + delta
-    const now = Date.now()
-    if (state.timer) clearTimeout(state.timer)
-    if (now - state.lastEditAt >= EDIT_INTERVAL_MS) {
-      await this.sender.editMessageText(state.chatId, state.messageId, buffer)
-      this.streamByThread.set(threadId, { ...state, buffer, lastEditAt: now, timer: null })
-    } else {
-      const timer = setTimeout(() => {
-        const s = this.streamByThread.get(threadId)
-        if (s) void this.sender.editMessageText(s.chatId, s.messageId, s.buffer).catch(() => {})
-      }, EDIT_INTERVAL_MS)
-      this.streamByThread.set(threadId, { ...state, buffer, timer })
-    }
-  }
-
-  private async onTurnCompleted(threadId: string): Promise<void> {
-    if (!threadId) return
-    const chatIds = this.threadToChats.get(threadId)
-    if (!chatIds?.size) return
-    const state = this.streamByThread.get(threadId)
-    if (state) {
-      if (state.timer) clearTimeout(state.timer)
-      const text = state.buffer || await this.readLatestReply(threadId)
-      if (text) await this.sender.editMessageText(state.chatId, state.messageId, text)
-      this.streamByThread.delete(threadId)
-      return
-    }
     const text = await this.readLatestReply(threadId)
     if (!text) return
+
     for (const chatId of chatIds) {
-      this.stopTyping(chatId)
       await this.sender.sendMessage(chatId, text)
     }
+
+    if (turnId) this.lastForwardedTurn.set(threadId, turnId)
   }
 
   private async onTokenUsage(threadId: string, params: unknown): Promise<void> {
@@ -288,6 +255,17 @@ export class TelegramAdapter {
     }
   }
 
+  private restoreThreadMappings(): void {
+    const saved = loadThreadMappings()
+    for (const [chatId, threadId] of saved) {
+      this.chatToThread.set(chatId, threadId)
+      const chats = this.threadToChats.get(threadId) ?? new Set<number>()
+      chats.add(chatId)
+      this.threadToChats.set(threadId, chats)
+    }
+    if (saved.size > 0) console.log(`[telegram] Restored ${saved.size} thread mapping(s)`)
+  }
+
   private bindThread(chatId: number, threadId: string): void {
     const prev = this.chatToThread.get(chatId)
     if (prev && prev !== threadId) {
@@ -299,6 +277,7 @@ export class TelegramAdapter {
     const chats = this.threadToChats.get(threadId) ?? new Set<number>()
     chats.add(chatId)
     this.threadToChats.set(threadId, chats)
+    saveThreadMapping(chatId, threadId)
   }
 
   private async newThread(chatId: number): Promise<string> {
@@ -315,8 +294,24 @@ export class TelegramAdapter {
     return threadId
   }
 
+  private readonly resumedThreads = new Set<string>()
+
   private async ensureThread(chatId: number): Promise<string> {
-    return this.chatToThread.get(chatId) ?? this.newThread(chatId)
+    const existing = this.chatToThread.get(chatId)
+    if (!existing) return this.newThread(chatId)
+
+    // Resume thread in codex if not yet resumed this session
+    if (!this.resumedThreads.has(existing)) {
+      try {
+        await this.codex.call('thread/resume', { threadId: existing, cwd: this.defaultCwd })
+        this.resumedThreads.add(existing)
+      } catch {
+        // Thread no longer exists in codex, create a new one
+        console.log(`[telegram] Thread ${existing.slice(0, 8)} not found, creating new`)
+        return this.newThread(chatId)
+      }
+    }
+    return existing
   }
 
   private async sendTurn(

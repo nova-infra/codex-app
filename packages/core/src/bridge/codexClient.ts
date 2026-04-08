@@ -46,6 +46,8 @@ export class CodexClient {
       const args = [
         'app-server',
         '--listen', `ws://127.0.0.1:${this.codexPort}`,
+        '-c', `approval_policy="${this.codexConfig.approvalPolicy}"`,
+        '-c', `sandbox_mode="${this.codexConfig.sandbox}"`,
       ]
 
       this.codexProcess = spawn('codex', args, {
@@ -96,10 +98,15 @@ export class CodexClient {
       this.ws.onerror = (e) => reject(new Error(`WebSocket error: ${e}`))
 
       this.ws.onmessage = (event) => {
-        const text = typeof event.data === 'string' ? event.data : ''
+        const raw = event.data
+        const text = typeof raw === 'string' ? raw
+          : raw instanceof Buffer ? raw.toString('utf-8')
+          : raw instanceof ArrayBuffer ? new TextDecoder().decode(raw)
+          : String(raw)
         for (const line of text.split('\n')) {
-          if (line.trim().length > 0) {
-            this.handleMessage(line.trim())
+          const trimmed = line.trim()
+          if (trimmed.length > 0) {
+            this.handleMessage(trimmed)
           }
         }
       }
@@ -137,6 +144,9 @@ export class CodexClient {
 
     // Notification (no id) or server request (has id + method)
     if (typeof msg.method === 'string') {
+      if (msg.method === 'turn/completed' || msg.method === 'turn/started') {
+        console.log(`[codex-ws] ${msg.method} (id=${msg.id ?? 'none'})`)
+      }
       this.emit({ method: msg.method, params: msg.params ?? null })
     }
   }

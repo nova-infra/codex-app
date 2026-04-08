@@ -38,3 +38,29 @@ export function saveBinding(binding: ChannelBinding): void {
   )
   writeBindings([...existing, binding])
 }
+
+// Thread mapping persistence (chatId → threadId)
+type ThreadMapping = { readonly chatId: string; readonly threadId: string }
+type ThreadMappingsFile = { readonly mappings?: readonly ThreadMapping[] }
+
+const THREAD_MAP_PATH = join(homedir(), '.codex-app', 'tg-threads.json')
+
+export function loadThreadMappings(): ReadonlyMap<number, string> {
+  if (!existsSync(THREAD_MAP_PATH)) return new Map()
+  try {
+    const data = JSON.parse(readFileSync(THREAD_MAP_PATH, 'utf-8')) as ThreadMappingsFile
+    const map = new Map<number, string>()
+    for (const m of data.mappings ?? []) {
+      map.set(Number(m.chatId), m.threadId)
+    }
+    return map
+  } catch { return new Map() }
+}
+
+export function saveThreadMapping(chatId: number, threadId: string): void {
+  const existing = loadThreadMappings()
+  const updated = new Map(existing)
+  updated.set(chatId, threadId)
+  const mappings = Array.from(updated.entries()).map(([c, t]) => ({ chatId: String(c), threadId: t }))
+  writeFileSync(THREAD_MAP_PATH, JSON.stringify({ mappings }, null, 2))
+}
