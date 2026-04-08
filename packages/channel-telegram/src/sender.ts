@@ -30,13 +30,15 @@ export class TelegramSender {
     return typeof result?.message_id === 'number' ? result.message_id : 0
   }
 
-  async editMessageText(chatId: number, messageId: number, text: string): Promise<void> {
+  async editMessageText(chatId: number, messageId: number, text: string, parseMode?: string): Promise<void> {
     if (!text.trim() || !messageId) return
-    await this.post('editMessageText', {
+    const body: Record<string, unknown> = {
       chat_id: chatId,
       message_id: messageId,
       text: text.trim(),
-    })
+    }
+    if (parseMode) body.parse_mode = parseMode
+    await this.post('editMessageText', body)
   }
 
   async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {

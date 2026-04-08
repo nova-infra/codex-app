@@ -144,10 +144,15 @@ export class CodexClient {
 
     // Notification (no id) or server request (has id + method)
     if (typeof msg.method === 'string') {
-      if (msg.method === 'turn/completed' || msg.method === 'turn/started') {
-        console.log(`[codex-ws] ${msg.method} (id=${msg.id ?? 'none'})`)
+      if (!msg.method.startsWith('mcpServer/')) {
+        console.log(`[codex-ws] ${new Date().toISOString()} ${msg.method}`)
       }
-      this.emit({ method: msg.method, params: msg.params ?? null })
+      // Server request (has both id and method) — needs reply
+      if (typeof msg.id === 'number') {
+        this.emit({ method: msg.method, params: { ...((msg.params ?? {}) as Record<string, unknown>), _requestId: msg.id } })
+      } else {
+        this.emit({ method: msg.method, params: msg.params ?? null })
+      }
     }
   }
 

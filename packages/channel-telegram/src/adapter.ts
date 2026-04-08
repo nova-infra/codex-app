@@ -8,6 +8,7 @@ import {
   listThreads, sendThreadPicker, sendModelPicker,
   sendReasoningPicker, extractLatestAssistantText,
 } from '@/pickers'
+import { markdownToTelegramHtml } from '@/format'
 
 type Notification = { readonly method: string; readonly params: unknown }
 
@@ -71,7 +72,7 @@ export class TelegramAdapter {
     const text = msg?.text?.trim() ?? ''
     const photo = msg?.photo
     if (!text && !photo?.length) return
-    console.log(`[telegram] Message from ${chatId}: ${text.slice(0, 50)}`)
+    console.log(`[telegram] ${new Date().toISOString()} Message from ${chatId}: ${text.slice(0, 50)}`)
     await this.dispatch(chatId, text, photo)
   }
 
@@ -197,13 +198,141 @@ export class TelegramAdapter {
     }
   }
 
+  /*
+   * TODO: 流式输出（editMessageText 渐进显示）
+   * 当前因 codex 回复速度快 + TG rate limit，流式体验不佳，暂用直接返回模式。
+   * 后续长回复场景可重新启用。参考 git log 中的流式实现。
+   */
+
+  // Tool progress tracking: one status message per turn, updated on each item
+  private readonly turnProgress = new Map<string, {
+    chatId: number
+    messageId: number
+    steps: string[]
+    lastEditAt: number
+  }>()
+
+  private static readonly TOOL_ICONS: Record<string, string> = {
+    commandExecution: '🔧',
+    fileChange: '📝',
+    mcpToolCall: '🔌',
+    webSearch: '🔍',
+    reasoning: '💭',
+    imageView: '🖼',
+    imageGeneration: '🎨',
+    dynamicToolCall: '⚡',
+    plan: '📋',
+  }
+
   private async onNotification(n: Notification): Promise<void> {
-    if (n.method === 'turn/completed') {
-      const threadId = extractThreadId(n)
-      console.log(`[telegram] turn/completed thread=${threadId.slice(0, 8)}`)
-      await this.onTurnCompleted(threadId, n.params)
-    } else if (n.method === 'thread/tokenUsage/updated') {
-      await this.onTokenUsage(extractThreadId(n), n.params)
+    const threadId = extractThreadId(n)
+    switch (n.method) {
+      case 'item/started':
+        await this.onItemStarted(threadId, n.params)
+        break
+      case 'item/completed':
+        await this.onItemCompleted(threadId, n.params)
+        break
+      case 'turn/completed':
+        await this.onTurnCompleted(threadId, n.params)
+        break
+      case 'thread/tokenUsage/updated':
+        await this.onTokenUsage(threadId, n.params)
+        break
+    }
+  }
+
+  private formatItemLabel(item: Record<string, unknown>): string | null {
+    const type = typeof item.type === 'string' ? item.type : ''
+    const icon = TelegramAdapter.TOOL_ICONS[type] ?? ''
+    if (!icon) return null
+
+    switch (type) {
+      case 'commandExecution': {
+        const cmd = typeof item.command === 'string' ? item.command : ''
+        return `${icon} ${cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd || '执行命令'}`
+      }
+      case 'fileChange': {
+        const changes = Array.isArray(item.changes) ? item.changes : []
+        const first = asRecord(changes[0])
+        const file = typeof first?.filePath === 'string' ? first.filePath : ''
+        const name = file ? file.split('/').pop() : ''
+        const label = name ? `修改 ${name}` : '修改文件'
+        return changes.length > 1 ? `${icon} ${label} (+${changes.length - 1})` : `${icon} ${label}`
+      }
+      case 'mcpToolCall': {
+        const tool = typeof item.tool === 'string' ? item.tool : ''
+        const server = typeof item.server === 'string' ? item.server : ''
+        return `${icon} ${tool || server || '工具调用'}`
+      }
+      case 'webSearch':
+        return `${icon} 搜索网页`
+      case 'reasoning':
+        return `${icon} 思考中...`
+      case 'plan':
+        return `${icon} 制定计划`
+      default:
+        return `${icon} ${type}`
+    }
+  }
+
+  private async onItemStarted(threadId: string, params: unknown): Promise<void> {
+    if (!threadId) return
+    const chatIds = this.threadToChats.get(threadId)
+    if (!chatIds?.size) return
+    const p = asRecord(params)
+    const item = asRecord(p?.item)
+    if (!item) return
+    console.log(`[telegram] item/started type=${item.type} cmd=${typeof item.command === 'string' ? item.command.slice(0, 40) : ''}`)
+
+    const label = this.formatItemLabel(item)
+    if (!label) return
+
+    const progress = this.turnProgress.get(threadId)
+    if (progress) {
+      const steps = [...progress.steps, `⏳ ${label}`]
+      const text = steps.join('\n')
+      const now = Date.now()
+      // Throttle edits to avoid rate limit
+      if (now - progress.lastEditAt > 800) {
+        await this.sender.editMessageText(progress.chatId, progress.messageId, text)
+        this.turnProgress.set(threadId, { ...progress, steps, lastEditAt: now })
+      } else {
+        this.turnProgress.set(threadId, { ...progress, steps })
+      }
+    } else {
+      // First item — send new status message
+      const chatId = chatIds.values().next().value!
+      const msgId = await this.sender.sendMessage(chatId, `⏳ ${label}`)
+      if (msgId) {
+        this.turnProgress.set(threadId, {
+          chatId, messageId: msgId, steps: [`⏳ ${label}`], lastEditAt: Date.now(),
+        })
+      }
+    }
+  }
+
+  private async onItemCompleted(threadId: string, params: unknown): Promise<void> {
+    if (!threadId) return
+    const progress = this.turnProgress.get(threadId)
+    if (!progress) return
+    const p = asRecord(params)
+    const item = asRecord(p?.item)
+    if (!item) return
+
+    const label = this.formatItemLabel(item)
+    if (!label) return
+
+    // Replace ⏳ with ✅ for completed item
+    const steps = progress.steps.map(s =>
+      s === `⏳ ${label}` ? `✅ ${label}` : s
+    )
+    const now = Date.now()
+    if (now - progress.lastEditAt > 800) {
+      await this.sender.editMessageText(progress.chatId, progress.messageId, steps.join('\n'))
+      this.turnProgress.set(threadId, { ...progress, steps, lastEditAt: now })
+    } else {
+      this.turnProgress.set(threadId, { ...progress, steps })
     }
   }
 
@@ -222,15 +351,23 @@ export class TelegramAdapter {
     const lastTurnId = this.lastForwardedTurn.get(threadId)
     if (turnId && lastTurnId === turnId) return
 
-    for (const chatId of chatIds) {
-      this.stopTyping(chatId)
-    }
+    for (const chatId of chatIds) this.stopTyping(chatId)
 
-    const text = await this.readLatestReply(threadId)
-    if (!text) return
+    const raw = await this.readLatestReply(threadId)
+    const progress = this.turnProgress.get(threadId)
+    this.turnProgress.delete(threadId)
 
-    for (const chatId of chatIds) {
-      await this.sender.sendMessage(chatId, text)
+    if (!raw) return
+
+    const html = markdownToTelegramHtml(raw)
+
+    if (progress) {
+      // Replace status message with final reply
+      await this.sender.editMessageText(progress.chatId, progress.messageId, html, 'HTML')
+    } else {
+      for (const chatId of chatIds) {
+        await this.sender.sendMessage(chatId, html, { parse_mode: 'HTML' })
+      }
     }
 
     if (turnId) this.lastForwardedTurn.set(threadId, turnId)
