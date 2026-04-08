@@ -6,6 +6,8 @@ import {
   NotificationHub,
   type AppConfig,
 } from '@codex-app/core'
+import { start as startTelegramChannel } from '@codex-app/channel-telegram'
+import { start as startWechatChannel } from '@codex-app/channel-wechat'
 import { WsProxy, type WsData } from './ws/wsProxy'
 
 const { config, created, adminToken } = await bootstrapConfig()
@@ -101,31 +103,30 @@ type ChannelDeps = {
   readonly tokenGuard: TokenGuard
 }
 
-type ChannelModule = {
-  start?: (deps: ChannelDeps) => Promise<void>
-}
-
 async function startChannels(cfg: AppConfig): Promise<void> {
   const deps: ChannelDeps = { config: cfg, codex, sessions: sessionManager, hub: notificationHub, tokenGuard }
 
   if (cfg.telegram?.botToken) {
-    await startChannel('@codex-app/channel-telegram', deps)
+    await startChannel('@codex-app/channel-telegram', startTelegramChannel, deps)
   }
 
   if (cfg.wechat?.enabled) {
-    await startChannel('@codex-app/channel-wechat', deps)
+    await startChannel('@codex-app/channel-wechat', startWechatChannel, deps)
   }
 }
 
-async function startChannel(pkg: string, deps: ChannelDeps): Promise<void> {
+type StartChannelFn = (deps: ChannelDeps) => Promise<void>
+
+async function startChannel(pkg: string, start: StartChannelFn, deps: ChannelDeps): Promise<void> {
   try {
-    const mod = await import(pkg) as ChannelModule
-    if (typeof mod.start === 'function') {
-      await mod.start(deps)
-      console.log(`[codex-app] ${pkg} started`)
-    } else {
-      console.log(`[codex-app] ${pkg} not yet implemented (stub)`)
-    }
+    // Keep these channel entrypoints statically imported.
+    // `bun build --compile` does not bundle the workspace packages behind
+    // `await import('@codex-app/channel-*')`, so the compiled binary later
+    // fails at runtime with "Cannot find module". This regression has already
+    // happened more than once; do not switch this back to dynamic import unless
+    // compiled runtime resolution is explicitly re-verified.
+    await start(deps)
+    console.log(`[codex-app] ${pkg} started`)
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[codex-app] Failed to start ${pkg}: ${message}`)

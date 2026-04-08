@@ -43,6 +43,15 @@ export class CodexClient {
 
   private spawnCodexServer(): Promise<void> {
     return new Promise((resolve, reject) => {
+      // `codex app-server` needs OPENAI_API_KEY in the service environment.
+      // This deployment miss has already happened multiple times; when the
+      // systemd unit or env file forgets to export it, startup later fails with
+      // "Missing environment variable: OPENAI_API_KEY". Keep this preflight
+      // warning here so the root cause is obvious in logs before the child exits.
+      if (!process.env['OPENAI_API_KEY']) {
+        console.warn('[codex-app] Warning: OPENAI_API_KEY is missing; codex app-server may fail to start. Check systemd EnvironmentFile / deploy env.')
+      }
+
       const args = [
         'app-server',
         '--listen', `ws://127.0.0.1:${this.codexPort}`,
