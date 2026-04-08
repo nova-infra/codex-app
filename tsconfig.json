@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@codex-app/core": ["packages/core/src/index.ts"],
+      "@codex-app/core/*": ["packages/core/src/*"],
+      "@codex-app/channel-telegram": ["packages/channel-telegram/src/index.ts"],
+      "@codex-app/channel-wechat": ["packages/channel-wechat/src/index.ts"]
+    },
+    "types": ["bun-types"]
+  },
+  "include": ["packages/*/src/**/*.ts"]
+}

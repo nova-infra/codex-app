@@ -1,0 +1,12 @@
+{
+  "name": "@codex-app/channel-wechat",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  },
+  "dependencies": {
+    "@codex-app/core": "workspace:*"
+  }
+}

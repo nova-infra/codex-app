@@ -1,0 +1,10 @@
+{
+  "name": "@codex-app/server",
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "@codex-app/core": "workspace:*",
+    "@codex-app/channel-telegram": "workspace:*",
+    "@codex-app/channel-wechat": "workspace:*"
+  }
+}

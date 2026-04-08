@@ -1,0 +1,44 @@
+{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "codex-app",
+    },
+    "packages/channel-telegram": {
+      "name": "@codex-app/channel-telegram",
+      "version": "0.1.0",
+      "dependencies": {
+        "@codex-app/core": "workspace:*",
+      },
+    },
+    "packages/channel-wechat": {
+      "name": "@codex-app/channel-wechat",
+      "version": "0.1.0",
+      "dependencies": {
+        "@codex-app/core": "workspace:*",
+      },
+    },
+    "packages/core": {
+      "name": "@codex-app/core",
+      "version": "0.1.0",
+    },
+    "packages/server": {
+      "name": "@codex-app/server",
+      "version": "0.1.0",
+      "dependencies": {
+        "@codex-app/channel-telegram": "workspace:*",
+        "@codex-app/channel-wechat": "workspace:*",
+        "@codex-app/core": "workspace:*",
+      },
+    },
+  },
+  "packages": {
+    "@codex-app/channel-telegram": ["@codex-app/channel-telegram@workspace:packages/channel-telegram"],
+
+    "@codex-app/channel-wechat": ["@codex-app/channel-wechat@workspace:packages/channel-wechat"],
+
+    "@codex-app/core": ["@codex-app/core@workspace:packages/core"],
+
+    "@codex-app/server": ["@codex-app/server@workspace:packages/server"],
+  }
+}
