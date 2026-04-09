@@ -4,9 +4,8 @@
  */
 
 import type { CodexClient } from '@codex-app/core'
-import { StreamCoalescer } from '@codex-app/core'
 import type { TelegramSender } from '@/sender'
-import { EditStreamEditor } from '@/streamEditor'
+import { createStreamingState, finalizeStreamingState, type StreamingState, type TelegramStreamingConfig } from '@/streaming'
 import { markdownToTelegramHtml, splitTelegramMessage } from '@/format'
 
 export type TurnProgress = {
@@ -14,12 +13,6 @@ export type TurnProgress = {
   messageId: number
   steps: string[]
   lastEditAt: number
-}
-
-/** Per-thread streaming state: coalescer + editor pair. */
-export type StreamingState = {
-  readonly editor: EditStreamEditor
-  readonly coalescer: StreamCoalescer
 }
 
 export type NotificationContext = {
@@ -31,12 +24,7 @@ export type NotificationContext = {
   readonly streaming: Map<string, StreamingState>
   readonly stopTyping: (chatId: number) => void
   readonly readLatestReply: (threadId: string) => Promise<string>
-  readonly streamingConfig?: {
-    readonly editIntervalMs?: number
-    readonly minChars?: number
-    readonly maxChars?: number
-    readonly idleMs?: number
-  }
+  readonly streamingConfig?: TelegramStreamingConfig
 }
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -49,8 +37,14 @@ function extractThreadId(n: { readonly params: unknown }): string {
   const p = asRecord(n.params)
   if (!p) return ''
   if (typeof p.threadId === 'string') return p.threadId
+  if (typeof p.thread_id === 'string') return p.thread_id
+  if (typeof p.conversationId === 'string') return p.conversationId
+  if (typeof p.conversation_id === 'string') return p.conversation_id
+  const thread = asRecord(p.thread)
+  if (typeof thread?.id === 'string') return thread.id
   const turn = asRecord(p.turn)
-  return typeof turn?.threadId === 'string' ? turn.threadId : ''
+  if (typeof turn?.threadId === 'string') return turn.threadId
+  return typeof turn?.thread_id === 'string' ? turn.thread_id : ''
 }
 
 const TOOL_ICONS: Record<string, string> = {
@@ -171,24 +165,14 @@ function getOrCreateStreaming(threadId: string, ctx: NotificationContext): Strea
   // If there's a progress message (tool steps), let the editor reuse it
   const progress = ctx.turnProgress.get(threadId)
 
-  const cfg = ctx.streamingConfig
-  const editor = new EditStreamEditor(ctx.sender, chatId, {
-    editIntervalMs: cfg?.editIntervalMs ?? 2000,
-    maxEditLength: 4000,
-    maxEditFailures: 3,
-  })
-
-  if (progress) {
-    editor.reuseMessage(progress.messageId)
-    ctx.turnProgress.delete(threadId)
-  }
-
-  const coalescer = new StreamCoalescer(
-    { minChars: cfg?.minChars ?? 20, maxChars: cfg?.maxChars ?? 2000, idleMs: cfg?.idleMs ?? 300 },
-    (text) => editor.appendText(text),
+  const state = createStreamingState(
+    ctx.sender,
+    chatId,
+    ctx.streamingConfig,
+    progress?.messageId,
   )
 
-  const state: StreamingState = { editor, coalescer }
+  if (progress) ctx.turnProgress.delete(threadId)
   ctx.streaming.set(threadId, state)
   return state
 }
@@ -202,12 +186,6 @@ async function onAgentMessageDelta(threadId: string, params: unknown, ctx: Notif
   const s = getOrCreateStreaming(threadId, ctx)
   if (!s) return
   await s.coalescer.feed(delta)
-}
-
-async function onReasoningDelta(threadId: string, ctx: NotificationContext): Promise<void> {
-  if (!threadId) return
-  const s = getOrCreateStreaming(threadId, ctx)
-  if (s) await s.editor.appendTool('Thinking')
 }
 
 // ---------------------------------------------------------------------------
@@ -229,9 +207,7 @@ async function onTurnCompleted(threadId: string, params: unknown, ctx: Notificat
   const streaming = ctx.streaming.get(threadId)
   if (streaming) {
     console.log(`[stream] finalizing: fullText=${streaming.editor.fullText.length} chars`)
-    await streaming.coalescer.flush()
-    streaming.coalescer.destroy()
-    await streaming.editor.finalize()
+    await finalizeStreamingState(streaming)
     ctx.streaming.delete(threadId)
     // If editor had content, we're done — streaming delivered the text
     if (streaming.editor.hasContent) {
@@ -328,7 +304,8 @@ export async function handleNotification(
       await onAgentMessageDelta(threadId, n.params, ctx)
       break
     case 'item/reasoning/summaryTextDelta':
-      await onReasoningDelta(threadId, ctx)
+      // Ignore reasoning summary deltas. The corresponding item/started event
+      // already creates the single progress card we want to show in Telegram.
       break
     case 'item/started':
       await onItemStarted(threadId, n.params, ctx)

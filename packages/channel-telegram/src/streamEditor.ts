@@ -1,5 +1,5 @@
-import { markdownToTelegramHtml, splitTelegramMessage } from './format'
-import type { TelegramSender } from './sender'
+import { markdownToTelegramHtml, splitTelegramMessage } from '@/format'
+import type { TelegramSender } from '@/sender'
 
 export type StreamEditorConfig = {
   readonly editIntervalMs: number
@@ -78,34 +78,40 @@ export class EditStreamEditor {
     this.scheduleEdit()
   }
 
-  /**
-   * Finalize: delete the streaming preview, then send the complete
-   * Markdown→HTML formatted message as new message(s).
-   */
+  seedFinalText(text: string): void {
+    if (!this.fullRawText && text.trim()) {
+      this.fullRawText = text
+    }
+  }
+
+  /** Finalize by upgrading the preview message into the formatted response. */
   async finalize(): Promise<void> {
     if (this.editTimer !== null) {
       clearTimeout(this.editTimer)
       this.editTimer = null
     }
 
-    // Delete the plain-text streaming preview message
+    const segments = this.renderFinalSegments()
+    if (segments.length === 0) return
+
+    const [firstSegment, ...restSegments] = segments
+
     if (this.activeMessageId !== null && !this.fallen) {
       try {
-        await this.sender.deleteMessage(this.chatId, this.activeMessageId)
+        await this.sender.editMessageText(
+          this.chatId,
+          this.activeMessageId,
+          firstSegment,
+          'HTML',
+        )
+        await this.sendHtmlSegments(restSegments)
+        return
       } catch {
-        // best effort — if delete fails, the old message stays
+        this.activeMessageId = null
       }
-      this.activeMessageId = null
     }
 
-    if (!this.fullRawText.trim()) return
-
-    // Send the full formatted version as new message(s)
-    const html = markdownToTelegramHtml(this.fullRawText)
-    const segments = splitTelegramMessage(html)
-    for (const seg of segments) {
-      await this.sender.sendMessage(this.chatId, seg, { parse_mode: 'HTML' })
-    }
+    await this.sendHtmlSegments(segments)
   }
 
   get hasContent(): boolean {
@@ -122,6 +128,18 @@ export class EditStreamEditor {
   private renderPreview(): string {
     const preview = this.fullRawText.slice(-this.cfg.maxEditLength)
     return preview + renderToolLine(this.toolEntries)
+  }
+
+  private renderFinalSegments(): string[] {
+    if (!this.fullRawText.trim()) return []
+    const html = markdownToTelegramHtml(this.fullRawText)
+    return splitTelegramMessage(html)
+  }
+
+  private async sendHtmlSegments(segments: readonly string[]): Promise<void> {
+    for (const seg of segments) {
+      await this.sender.sendMessage(this.chatId, seg, { parse_mode: 'HTML' })
+    }
   }
 
   private scheduleEdit(): void {

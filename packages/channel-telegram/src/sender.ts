@@ -89,7 +89,11 @@ export class TelegramSender {
     const json = await res.json()
     const result = asRecord(json)
     if (result && result.ok === false) {
-      console.error(`[telegram] API ${method} failed:`, result.description ?? json)
+      const description = typeof result.description === 'string'
+        ? result.description
+        : JSON.stringify(json)
+      console.error(`[telegram] API ${method} failed:`, description)
+      throw new Error(`Telegram API ${method} failed: ${description}`)
     }
     return json
   }
