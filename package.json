@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "bun run packages/server/src/index.ts",
     "build": "bun build packages/server/src/index.ts --compile --outfile codex-app-server",
+    "graphify": "bash scripts/graphify.sh",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release:tag": "changeset tag"

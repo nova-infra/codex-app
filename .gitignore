@@ -2,6 +2,9 @@ node_modules/
 dist/
 codex-app-server
 *.log
+.codex/
+graphify-out/
+packages/**/graphify-out/
 .DS_Store
 .omx/
 test.txt
