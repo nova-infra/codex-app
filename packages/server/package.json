@@ -4,6 +4,7 @@
   "type": "module",
   "dependencies": {
     "@codex-app/core": "workspace:*",
+    "@codex-app/codex-account": "workspace:*",
     "@codex-app/channel-telegram": "workspace:*",
     "@codex-app/channel-wechat": "workspace:*"
   }

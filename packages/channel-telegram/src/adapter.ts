@@ -13,6 +13,9 @@ import {
   handleModelCallback, handleReasoningCallback, handleContextCallback,
   type CommandContext,
 } from '@/commands'
+import { sendCxReply } from '@/account-commands'
+import type { AccountManager } from '@codex-app/codex-account'
+import { handleCxCommand, handleCxCallback } from '@codex-app/codex-account'
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
@@ -40,6 +43,7 @@ export class TelegramAdapter {
     private readonly sender: TelegramSender,
     private readonly tokenGuard: TokenGuard,
     config: AppConfig,
+    private readonly accountManager: AccountManager | null = null,
   ) {
     this.config = config
   }
@@ -139,6 +143,10 @@ export class TelegramAdapter {
     if (text === '/model') { await sendModelPicker(chatId, this.codex, this.sender); return }
     if (text === '/reasoning') { await sendReasoningPicker(chatId, this.sender); return }
     if (text.startsWith('/token')) { await handleTokenCommand(chatId, text, bound.userId, this.cmdCtx()); return }
+    if (text === '/cx' || text.startsWith('/cx ') || text.startsWith('/cx_')) {
+      await this.handleCxText(chatId, text)
+      return
+    }
     const projectMatch = text.match(/^\/project\s+(\S+)$/)
     if (projectMatch) {
       const path = projectMatch[1]!
@@ -165,6 +173,18 @@ export class TelegramAdapter {
     }
     await saveBinding({ type: 'telegram', externalId: String(chatId), userId, updatedAt: new Date().toISOString() })
     await this.sender.sendMessage(chatId, '绑定成功！发送 /help 查看可用命令。')
+  }
+
+  private async handleCxText(chatId: number, text: string): Promise<void> {
+    if (!this.accountManager) {
+      await this.sender.sendMessage(chatId, 'Codex 账号管理未启用。')
+      return
+    }
+    // Normalise /cx_login → /cx login etc.
+    const normalised = text.replace(/^\/cx_/, '/cx ')
+    const reply = await handleCxCommand(normalised, this.accountManager)
+    if (!reply) return
+    await sendCxReply(this.sender, chatId, reply)
   }
 
   private async handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>): Promise<void> {
@@ -211,6 +231,14 @@ export class TelegramAdapter {
     if (data.startsWith('ctx:')) {
       await handleContextCallback(chatId, cbId, data.slice('ctx:'.length), this.cmdCtx())
       return
+    }
+    if (data.startsWith('cx:') && this.accountManager) {
+      const reply = await handleCxCallback(data, this.accountManager)
+      if (reply) {
+        await this.sender.answerCallbackQuery(cbId)
+        await sendCxReply(this.sender, chatId, reply)
+        return
+      }
     }
     await this.sender.answerCallbackQuery(cbId, '未知操作')
   }

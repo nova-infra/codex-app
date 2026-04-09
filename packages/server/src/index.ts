@@ -6,6 +6,7 @@ import {
   NotificationHub,
   type AppConfig,
 } from '@codex-app/core'
+import { AccountManager, callbackRegistry } from '@codex-app/codex-account'
 import { execFileSync } from 'node:child_process'
 import { start as startTelegramChannel } from '@codex-app/channel-telegram'
 import { start as startWechatChannel } from '@codex-app/channel-wechat'
@@ -34,6 +35,18 @@ if (created) {
 // Auth
 const tokenGuard = new TokenGuard(config.users, config.tokens)
 
+// Account management (writes ~/.codex/auth.json directly, no restart needed)
+const accountManager = new AccountManager(config.port)
+await accountManager.load()
+
+if (accountManager.hasAccounts()) {
+  await accountManager.applyActiveKey()
+  const active = accountManager.getActiveAccount()
+  if (active) {
+    console.log(`[codex-app] Using account: ${active.email} (${active.id})`)
+  }
+}
+
 // Bridge
 const codex = new CodexClient(config.codex.port, {
   approvalPolicy: config.codex.approvalPolicy,
@@ -56,7 +69,7 @@ const wsProxy = new WsProxy(codex, sessionManager, notificationHub)
 const server = Bun.serve<WsData>({
   port: config.port,
 
-  fetch(req, server) {
+  async fetch(req, server) {
     const url = new URL(req.url)
 
     if (url.pathname === '/health') {
@@ -77,6 +90,89 @@ const server = Bun.serve<WsData>({
         gitDirty,
         codex: codex.isConnected,
       }), { headers: { 'content-type': 'application/json' } })
+    }
+
+    // ── Codex Account Management ─────────────────────────────────────────────
+
+    // List accounts (masked)
+    if (url.pathname === '/codex-account' && req.method === 'GET') {
+      return jsonResponse({ success: true, data: accountManager.list() })
+    }
+
+    // Auth method 1: Login (browser OAuth) → returns authUrl
+    if (url.pathname === '/codex-account/login' && req.method === 'POST') {
+      const { authUrl, state } = await accountManager.initiateLogin()
+      return jsonResponse({ success: true, data: { authUrl, state } })
+    }
+
+    // OAuth callback (browser redirect target)
+    if (url.pathname === '/codex-account/callback' && req.method === 'GET') {
+      const code = url.searchParams.get('code')
+      const state = url.searchParams.get('state')
+      if (!code || !state) {
+        return new Response('Missing code or state', { status: 400 })
+      }
+      try {
+        const account = await accountManager.handleCallback(code, state)
+        callbackRegistry.notifyLogin(state, account.email)
+        return new Response(`<html><body><h2>Account added: ${account.email}</h2><p>You can close this tab.</p></body></html>`, {
+          headers: { 'content-type': 'text/html' },
+        })
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        return new Response(`<html><body><h2>Auth failed</h2><p>${message}</p></body></html>`, {
+          status: 400,
+          headers: { 'content-type': 'text/html' },
+        })
+      }
+    }
+
+    // Auth method 2+3: Authorization code or Refresh token
+    if (url.pathname === '/codex-account/token' && req.method === 'POST') {
+      const body = await req.json() as { code?: string; codeVerifier?: string; refreshToken?: string }
+      try {
+        let account
+        if (body.refreshToken) {
+          account = await accountManager.addByRefreshToken(body.refreshToken)
+        } else if (body.code && body.codeVerifier) {
+          account = await accountManager.addByCode(body.code, body.codeVerifier)
+        } else {
+          return jsonResponse({ success: false, error: 'Provide { refreshToken } or { code, codeVerifier }' }, 400)
+        }
+        return jsonResponse({ success: true, data: account })
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        return jsonResponse({ success: false, error: message }, 400)
+      }
+    }
+
+    // Delete account
+    if (url.pathname.startsWith('/codex-account/') && req.method === 'DELETE') {
+      const id = url.pathname.slice('/codex-account/'.length)
+      if (id.includes('/')) return new Response('Not Found', { status: 404 })
+      const ok = await accountManager.remove(id)
+      if (!ok) return jsonResponse({ success: false, error: 'account not found' }, 404)
+      return jsonResponse({ success: true })
+    }
+
+    // Usage (5h / 1week)
+    if (url.pathname.startsWith('/codex-account/') && url.pathname.endsWith('/usage') && req.method === 'GET') {
+      const id = url.pathname.slice('/codex-account/'.length, -'/usage'.length)
+      try {
+        const usage = await accountManager.getUsage(id)
+        return jsonResponse({ success: true, data: usage })
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        return jsonResponse({ success: false, error: message }, 400)
+      }
+    }
+
+    // Switch active account
+    if (url.pathname.startsWith('/codex-account/') && url.pathname.endsWith('/activate') && req.method === 'POST') {
+      const id = url.pathname.slice('/codex-account/'.length, -'/activate'.length)
+      const ok = await accountManager.switchTo(id)
+      if (!ok) return jsonResponse({ success: false, error: 'account not found or disabled' }, 404)
+      return jsonResponse({ success: true, message: 'auth.json updated' })
     }
 
     if (url.pathname === '/ws') {
@@ -120,10 +216,11 @@ type ChannelDeps = {
   readonly sessions: SessionManager
   readonly hub: NotificationHub
   readonly tokenGuard: TokenGuard
+  readonly accountManager: AccountManager
 }
 
 async function startChannels(cfg: AppConfig): Promise<void> {
-  const deps: ChannelDeps = { config: cfg, codex, sessions: sessionManager, hub: notificationHub, tokenGuard }
+  const deps: ChannelDeps = { config: cfg, codex, sessions: sessionManager, hub: notificationHub, tokenGuard, accountManager }
 
   if (cfg.telegram?.botToken) {
     await startChannel('@codex-app/channel-telegram', startTelegramChannel, deps)
@@ -150,6 +247,13 @@ async function startChannel(pkg: string, start: StartChannelFn, deps: ChannelDep
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[codex-app] Failed to start ${pkg}: ${message}`)
   }
+}
+
+function jsonResponse(body: Record<string, unknown>, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
 }
 
 function resolveGitSha(): string | null {
