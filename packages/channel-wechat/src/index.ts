@@ -27,7 +27,7 @@ export class WechatChannel {
       onError: (err) => process.stderr.write(`[WeChat] Error: ${err}\n`),
     })
     this.sender = new WechatSender(this.poller.client, DEFAULT_CDN_BASE)
-    this.adapter = new WechatAdapter(codex, this.sender, config)
+    this.adapter = new WechatAdapter(codex, this.sender, config, () => this.poller.status)
   }
 
   async start(): Promise<void> {

@@ -54,6 +54,8 @@ bun run dev
 
 无需手动编辑配置文件，开箱即用。
 
+如果本机 `~/.codex/auth.json` 已经登录了 Codex，`codex-app` 会在首次启动时自动导入该账号并作为默认活跃账号。
+
 ## 配置
 
 配置文件位于 `~/.codex-app/config.json`，首次启动自动创建。

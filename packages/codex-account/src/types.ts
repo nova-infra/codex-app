@@ -35,7 +35,7 @@ export type UsageWindow = {
 }
 
 export type AccountUsage = {
-  readonly session3h: UsageWindow
+  readonly session5h: UsageWindow
   readonly weekly: UsageWindow
   readonly limitReached: boolean
 }

@@ -3,20 +3,26 @@ import type { CommandReply } from './command-types'
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
-/** Render a 10-segment Unicode block progress bar: `[████████░░] 80%` */
+/** Render a 10-segment Unicode block progress bar. */
 export function progressBar(percent: number): string {
-  const clamped = Math.min(100, Math.max(0, percent))
-  const filled = Math.round((clamped / 100) * 10)
-  return `[${'█'.repeat(filled)}${'░'.repeat(10 - filled)}] ${clamped.toFixed(0)}%`
+  const used = Math.min(100, Math.max(0, percent))
+  const remaining = Math.max(0, 100 - used)
+  const filled = Math.round((remaining / 100) * 10)
+  return `[${'█'.repeat(filled)}${'░'.repeat(10 - filled)}]`
 }
 
-function fmtDate(iso: string): string {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toISOString().replace('T', ' ').slice(0, 16)
-  } catch {
-    return iso
-  }
+function fmtRemaining(iso: string): string {
+  if (!iso) return ''
+  const ms = new Date(iso).getTime() - Date.now()
+  if (!Number.isFinite(ms)) return ''
+  if (ms <= 0) return '已到期'
+  const totalMinutes = Math.ceil(ms / 60_000)
+  const days = Math.floor(totalMinutes / (60 * 24))
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60)
+  const minutes = totalMinutes % 60
+  if (days > 0) return `${days}d`
+  if (hours > 0) return `${hours}h`
+  return `${minutes}m`
 }
 
 // ── Command handlers ──────────────────────────────────────────────────────────
@@ -71,6 +77,7 @@ export async function handleUsage(manager: AccountManager): Promise<CommandReply
     return { text: '没有可用账号。使用 /cx login 添加。' }
   }
 
+  await manager.refreshAll()
   const settled = await Promise.allSettled(
     accounts.map(a => manager.getUsage(a.id).then(usage => ({ account: a, usage }))),
   )
@@ -79,10 +86,12 @@ export async function handleUsage(manager: AccountManager): Promise<CommandReply
   for (const result of settled) {
     if (result.status === 'fulfilled') {
       const { account, usage } = result.value
+      const used5h = Math.min(100, Math.max(0, usage.session5h.usedPercent))
+      const usedWeekly = Math.min(100, Math.max(0, usage.weekly.usedPercent))
       lines.push(
         `${account.email}${account.isActive ? ' ✦当前' : ''}`,
-        `3h  ${progressBar(usage.session3h.usedPercent)}  重置 ${fmtDate(usage.session3h.resetAt)}`,
-        `周  ${progressBar(usage.weekly.usedPercent)}  重置 ${fmtDate(usage.weekly.resetAt)}`,
+        `5h  ${progressBar(usage.session5h.usedPercent)} ${100 - used5h}% ${fmtRemaining(usage.session5h.resetAt)}`.trimEnd(),
+        `周  ${progressBar(usage.weekly.usedPercent)} ${100 - usedWeekly}% ${fmtRemaining(usage.weekly.resetAt)}`.trimEnd(),
         ...(usage.limitReached ? ['⚠ 用量已达上限'] : []),
         '',
       )

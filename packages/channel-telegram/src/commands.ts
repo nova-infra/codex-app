@@ -5,6 +5,7 @@
 
 import { type AppConfig, addUser, revokeToken, listUsers, loadConfig } from '@codex-app/core'
 import type { CodexClient } from '@codex-app/core'
+import type { AccountManager } from '@codex-app/codex-account'
 import type { ReasoningEffort } from '@/types'
 import { REASONING_EFFORTS } from '@/types'
 import type { TelegramSender } from '@/sender'
@@ -12,6 +13,7 @@ import type { TelegramSender } from '@/sender'
 export type CommandContext = {
   readonly sender: TelegramSender
   readonly codex: CodexClient
+  readonly accountManager?: AccountManager | null
   readonly chatToThread: ReadonlyMap<number, string>
   readonly modelByChat: Map<number, string>
   readonly reasoningByChat: Map<number, ReasoningEffort | ''>
@@ -30,6 +32,7 @@ export async function sendHelp(chatId: number, sender: TelegramSender): Promise<
     '/reasoning - 选择推理深度',
     '/status - 查看状态',
     '/token - 管理 Token（管理员）',
+    '/cx - Codex 账号管理',
     '/help - 查看命令说明',
   ].join('\n'))
 }
@@ -42,6 +45,12 @@ export async function sendStatus(chatId: number, ctx: CommandContext): Promise<v
     lines.push(`会话：${threadId}`, `目录：${cwd || '（未设置）'}`)
   } else {
     lines.push('会话：（未绑定）')
+  }
+  if (ctx.accountManager) {
+    const activeAccount = ctx.accountManager.getActiveAccount()
+    lines.push(activeAccount
+      ? `Codex 账号：${activeAccount.email} (${activeAccount.planType})`
+      : 'Codex 账号：（未导入）')
   }
   const model = ctx.modelByChat.get(chatId)
   if (model) lines.push(`模型：${model}`)

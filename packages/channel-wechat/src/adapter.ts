@@ -11,6 +11,7 @@ import { WechatSender } from '@/sender'
 import { collectInboundTextForCodex, hasWeChatRichMediaForCommands } from '@/textFormat'
 import { buildCodexTurnInputFromWeChatItems } from '@/turnInput'
 import { findBinding, saveBinding, updateBinding } from '@codex-app/core'
+import type { PollerStatus } from '@/polling'
 
 const DEFAULT_CDN_BASE = 'https://novac2c.cdn.weixin.qq.com/c2c'
 
@@ -65,6 +66,7 @@ export class WechatAdapter {
     private readonly codex: CodexClient,
     private readonly sender: WechatSender,
     private readonly config: AppConfig,
+    private readonly getPollerStatus: () => PollerStatus,
   ) {}
 
   private async resolveCwd(chatId: string): Promise<string> {
@@ -289,6 +291,13 @@ export class WechatAdapter {
       const cwd = await this.readThreadCwd(threadId)
       lines.push(`会话：${threadId}`, `目录：${cwd || '（未设置）'}`)
     } else { lines.push('会话：（未绑定）') }
+    const poller = this.getPollerStatus()
+    lines.push(
+      `登录状态：${poller.loginState}`,
+      `已配置：${poller.configured ? '是' : '否'}`,
+      `baseUrl：${poller.baseUrl || '（未设置）'}`,
+    )
+    if (poller.lastError) lines.push(`最近错误：${poller.lastError}`)
     await this.sendRaw(chatId, lines.join('\n'))
   }
 

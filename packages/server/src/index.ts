@@ -37,14 +37,18 @@ const tokenGuard = new TokenGuard(config.users, config.tokens)
 
 // Account management (writes ~/.codex/auth.json directly, no restart needed)
 const accountManager = new AccountManager(config.port)
-await accountManager.load()
+const importedExistingAccount = await accountManager.load()
+if (importedExistingAccount) {
+  console.log('[codex-app] Imported existing Codex login from ~/.codex/auth.json')
+}
 
 if (accountManager.hasAccounts()) {
   await accountManager.applyActiveKey()
-  const active = accountManager.getActiveAccount()
-  if (active) {
-    console.log(`[codex-app] Using account: ${active.email} (${active.id})`)
-  }
+}
+
+const active = accountManager.getActiveAccount()
+if (active) {
+  console.log(`[codex-app] Using account: ${active.email} (${active.id})`)
 }
 
 // Bridge

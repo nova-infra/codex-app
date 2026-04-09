@@ -34,6 +34,7 @@ export type PollerStatus = {
   qrCodeUrl: string
   lastError: string
   configured: boolean
+  baseUrl: string
 }
 
 export class ILinkPoller {
@@ -44,6 +45,7 @@ export class ILinkPoller {
   private qrCodeUrl = ''
   private lastError = ''
   private lastUpdateCursor = ''
+  private baseUrl = ''
   private longPollTimeoutMs = DEFAULT_LONG_POLL_MS
   private pollConsecutiveFailures = 0
 
@@ -58,6 +60,7 @@ export class ILinkPoller {
       qrCodeUrl: this.qrCodeUrl,
       lastError: this.lastError,
       configured: this.client.isConfigured,
+      baseUrl: this.baseUrl,
     }
   }
 
@@ -91,6 +94,7 @@ export class ILinkPoller {
       const cursor = typeof raw.lastUpdateCursor === 'string' ? raw.lastUpdateCursor : ''
       if (!botToken) return false
       this.client.configure(botToken, baseUrl || undefined)
+      this.baseUrl = baseUrl
       this.lastUpdateCursor = cursor
       return true
     } catch {
@@ -103,7 +107,7 @@ export class ILinkPoller {
     if (!existsSync(sessionDir)) await mkdir(sessionDir, { recursive: true })
     const session: WeChatSession = {
       botToken: this.client.token,
-      baseUrl: '',
+      baseUrl: this.baseUrl,
       lastUpdateCursor: this.lastUpdateCursor,
       savedAt: new Date().toISOString(),
     }
@@ -141,6 +145,7 @@ export class ILinkPoller {
           if (botToken) {
             this.qrCodeUrl = ''
             this.client.configure(botToken, baseUrl || undefined)
+            this.baseUrl = baseUrl
             this.loginState = 'confirmed'
             await this.saveSession()
             this.loginState = 'active'

@@ -56,6 +56,7 @@ export class TelegramAdapter {
     return {
       sender: this.sender,
       codex: this.codex,
+      accountManager: this.accountManager,
       chatToThread: this.chatToThread,
       modelByChat: this.modelByChat,
       reasoningByChat: this.reasoningByChat,

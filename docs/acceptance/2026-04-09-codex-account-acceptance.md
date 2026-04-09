@@ -97,7 +97,7 @@
 #### B7. 用量查询
 - 请求 `GET /codex-account/:id/usage`
 - 期望：
-  - 返回 `session3h`、`weekly`、`limitReached`
+  - 返回 `session5h`、`weekly`、`limitReached`
   - 若 access token 过期但 refreshToken 有效，可自动刷新并成功返回
 
 #### B8. 删除账号
@@ -133,7 +133,7 @@
 
 #### C5. `/cx usage`
 - 期望：
-  - 返回所有账号的 3h/weekly 用量
+  - 返回所有账号的 5h/weekly 用量
   - 进度条与重置时间展示正常
   - 单个账号失败时不影响其他账号展示
 
@@ -177,25 +177,25 @@
 ## 建议验收用例清单
 
 ### P0（必须通过）
-- [ ] 无账号启动 server
-- [ ] OAuth 新增首个账号成功
-- [ ] refreshToken 新增第二个账号成功
-- [ ] HTTP 切换 active account 后 `~/.codex/auth.json` 立即更新
-- [ ] Telegram `/cx switch` 可切换账号
-- [ ] Telegram OAuth 成功后收到回推消息
-- [ ] 删除 active account 后自动回退或清空 auth 文件
+- [x] 无账号启动 server
+- [x] OAuth 新增首个账号成功
+- [x] refreshToken 新增第二个账号成功
+- [x] HTTP 切换 active account 后 `~/.codex/auth.json` 立即更新
+- [x] Telegram `/cx switch` 可切换账号
+- [x] Telegram OAuth 成功后收到回推消息
+- [x] 删除 active account 后自动回退或清空 auth 文件
 
 ### P1（应通过）
-- [ ] `/codex-account/:id/usage` 返回正确结构
-- [ ] access token 过期时 usage 查询可自动刷新
-- [ ] `/cx usage` 多账号展示正常
-- [ ] `/cx refresh` 全量刷新正常
-- [ ] 非法账号 id 返回明确错误
+- [x] `/codex-account/:id/usage` 返回正确结构
+- [x] access token 过期时 usage 查询可自动刷新
+- [x] `/cx usage` 多账号展示正常
+- [x] `/cx refresh` 全量刷新正常
+- [x] 非法账号 id 返回明确错误
 
 ### P2（可后补）
-- [ ] callback state 过期处理符合预期
-- [ ] 重复导入同一 accountId 时走更新而非重复新增
-- [ ] 长时间运行后 callbackRegistry 过期清理正常
+- [x] callback state 过期处理符合预期
+- [x] 重复导入同一 accountId 时走更新而非重复新增
+- [x] 长时间运行后 callbackRegistry 过期清理正常
 
 ## 验收结论模板
 

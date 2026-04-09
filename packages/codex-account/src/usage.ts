@@ -6,13 +6,27 @@ const USAGE_ENDPOINT = 'https://chatgpt.com/backend-api/wham/usage'
 
 type RawUsageQuota = {
   used_percent: number
-  reset_at: string
+  reset_at?: string | number
+  reset_after_seconds?: number
+  limit_window_seconds?: number
 }
 
 type RawUsageResponse = {
   session_3h?: RawUsageQuota
   weekly?: RawUsageQuota
   limit_reached?: boolean
+  rate_limit?: {
+    allowed?: boolean
+    limit_reached?: boolean
+    primary_window?: RawUsageQuota
+    secondary_window?: RawUsageQuota
+  }
+  spend_control?: {
+    reached?: boolean
+  }
+  credits?: {
+    overage_limit_reached?: boolean
+  }
 }
 
 export type FetchUsageResult = {
@@ -37,6 +51,14 @@ function isExpired(token: string): boolean {
   if (exp === null) return true
   // Refresh 60s early to avoid clock-skew failures
   return Date.now() >= (exp - 60) * 1000
+}
+
+function toResetAt(value: string | number | undefined): string {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    const ms = value < 1_000_000_000_000 ? value * 1000 : value
+    return new Date(ms).toISOString()
+  }
+  return typeof value === 'string' ? value : ''
 }
 
 export async function fetchUsage(
@@ -68,17 +90,24 @@ export async function fetchUsage(
   }
 
   const raw = (await res.json()) as RawUsageResponse
+  const primaryWindow = raw.rate_limit?.primary_window ?? raw.session_3h
+  const secondaryWindow = raw.rate_limit?.secondary_window ?? raw.weekly
+  const limitReached = raw.rate_limit?.limit_reached ??
+    raw.spend_control?.reached ??
+    raw.credits?.overage_limit_reached ??
+    raw.limit_reached ??
+    false
 
   const usage: AccountUsage = {
-    session3h: {
-      usedPercent: raw.session_3h?.used_percent ?? 0,
-      resetAt: raw.session_3h?.reset_at ?? '',
+    session5h: {
+      usedPercent: primaryWindow?.used_percent ?? 0,
+      resetAt: toResetAt(primaryWindow?.reset_at),
     },
     weekly: {
-      usedPercent: raw.weekly?.used_percent ?? 0,
-      resetAt: raw.weekly?.reset_at ?? '',
+      usedPercent: secondaryWindow?.used_percent ?? 0,
+      resetAt: toResetAt(secondaryWindow?.reset_at),
     },
-    limitReached: raw.limit_reached ?? false,
+    limitReached,
   }
 
   return { usage, refreshed }

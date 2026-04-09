@@ -1,21 +1,24 @@
 import type { AccountData, CodexAccount, MaskedAccount, AccountUsage, OAuthState, RefreshResult } from './types'
-import { loadAccounts, saveAccounts, getActiveAccount, generateAccountId, applyAuthFile, clearAuthFile } from './store'
-import { extractAccountInfo } from './jwt'
+import { loadAccounts, saveAccounts, getActiveAccount, generateAccountId, applyAuthFile, clearAuthFile, readCodexAuthFile } from './store'
+import { extractAccountInfo, decodeJwtPayload } from './jwt'
 import { generateCodeVerifier, generateCodeChallenge, generateState, buildAuthUrl, exchangeCode, refreshTokens } from './oauth'
 import type { TokenResponse } from './oauth'
 import { fetchUsage } from './usage'
 
 /** Max age for pending OAuth states (10 minutes). */
 const STATE_TTL_MS = 10 * 60 * 1000
-
 export class AccountManager {
   private data: AccountData = { activeAccountId: null, accounts: [] }
   private readonly pendingStates = new Map<string, OAuthState>()
 
   constructor(private readonly callbackPort: number) {}
 
-  async load(): Promise<void> {
+  async load(): Promise<boolean> {
     this.data = await loadAccounts()
+    if (this.data.accounts.length === 0) {
+      return this.importExistingCodexAuth()
+    }
+    return false
   }
 
   // ── Auth method 1: Login (browser OAuth PKCE) ────────────────────────────
@@ -111,6 +114,7 @@ export class AccountManager {
 
     const tokens = await refreshTokens(account.refreshToken)
     await this.updateTokens(accountId, tokens)
+    this.usageCache.delete(accountId)
 
     const updated = this.data.accounts.find(a => a.id === accountId)!
     return this.toMasked(updated)
@@ -218,6 +222,45 @@ export class AccountManager {
     return this.toMasked(account)
   }
 
+  private async importExistingCodexAuth(): Promise<boolean> {
+    const snapshot = await readCodexAuthFile()
+    const tokens = snapshot?.tokens
+    const accessToken = typeof tokens?.access_token === 'string' ? tokens.access_token.trim() : ''
+    const refreshToken = typeof tokens?.refresh_token === 'string' ? tokens.refresh_token.trim() : ''
+    const idToken = typeof tokens?.id_token === 'string' ? tokens.id_token.trim() : ''
+    const accountId = typeof tokens?.account_id === 'string' ? tokens.account_id.trim() : ''
+
+    if (!accessToken || !refreshToken || !idToken || !accountId) {
+      return false
+    }
+
+    try {
+      const info = extractAccountInfo(idToken)
+      const now = new Date().toISOString()
+      const expired = this.readJwtExp(accessToken)
+      const account: CodexAccount = {
+        id: generateAccountId(),
+        email: info.email,
+        accountId,
+        accessToken,
+        refreshToken,
+        idToken,
+        planType: info.planType,
+        expired: expired ? new Date(expired * 1000).toISOString() : now,
+        lastRefresh: snapshot?.last_refresh?.trim() || now,
+        disabled: false,
+        createdAt: now,
+      }
+
+      this.data = { activeAccountId: account.id, accounts: [account] }
+      await saveAccounts(this.data)
+      await applyAuthFile(account)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   private async updateTokens(accountId: string, tokens: TokenResponse): Promise<void> {
     const expiredAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString()
     const now = new Date().toISOString()
@@ -258,6 +301,15 @@ export class AccountManager {
       if (now - val.createdAt > STATE_TTL_MS) {
         this.pendingStates.delete(key)
       }
+    }
+  }
+
+  private readJwtExp(token: string): number | null {
+    try {
+      const payload = decodeJwtPayload(token)
+      return typeof payload.exp === 'number' ? payload.exp : null
+    } catch {
+      return null
     }
   }
 }

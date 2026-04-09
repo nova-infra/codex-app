@@ -9,13 +9,6 @@
 | 完整设计文档 | `docs/specs/2026-04-08-codex-app-design.md` |
 | 版本/发布工作流 | `docs/workflows/versioning-and-release.md` |
 
-## 图谱约定
-
-- `Graphify` 在本仓库内统一称为 `图谱`
-- 需要做代码结构理解、跨文件关系查询、仓库摘要时，优先先跑 `graphify`
-- 生成结果默认看 `graphify-out/GRAPH_REPORT.md` 和 `graphify-out/graph.json`
-- 后续在对话里说“查图谱”“更新图谱”“看图谱”，都指 `Graphify`
-
 ## 架构概览
 
 ```
