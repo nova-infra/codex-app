@@ -64,6 +64,7 @@ export class TelegramAdapter {
       getCwd: threadId => this.readCwd(threadId),
       newThread: chatId => this.newThread(chatId),
       onConfigUpdate: cfg => { this.config = cfg },
+      persistChatState: (chatId, patch) => updateBinding('telegram', String(chatId), patch),
     }
   }
 
@@ -166,12 +167,12 @@ export class TelegramAdapter {
   }
 
   private async handleTokenInput(chatId: number, token: string): Promise<void> {
-    this.awaitingToken.delete(chatId)
     const userId = this.tokenGuard.resolveUserId(token.trim())
     if (!userId) {
       await this.sender.sendMessage(chatId, 'Token 无效，请重新发送消息再试。')
       return
     }
+    this.awaitingToken.delete(chatId)
     await saveBinding({ type: 'telegram', externalId: String(chatId), userId, updatedAt: new Date().toISOString() })
     await this.sender.sendMessage(chatId, '绑定成功！发送 /help 查看可用命令。')
   }
@@ -204,9 +205,9 @@ export class TelegramAdapter {
       return
     }
     if (data.startsWith('ws:')) {
-      const ws = data.slice('ws:'.length).trim()
+      const workspaceKey = data.slice('ws:'.length).trim()
       const threads = await listThreads(this.codex)
-      const sub = threads.filter(t => t.workspace === ws)
+      const sub = threads.filter(t => t.workspaceKey === workspaceKey)
       if (!sub.length) { await this.sender.answerCallbackQuery(cbId, '无会话'); return }
       const rows = [
         [{ text: '← 返回', callback_data: 'back:session' }],
@@ -301,6 +302,8 @@ export class TelegramAdapter {
     const saved = await loadAllBindings('telegram')
     let count = 0
     for (const b of saved) {
+      if (b.model) this.modelByChat.set(Number(b.externalId), b.model)
+      if (b.reasoning && b.reasoning !== '') this.reasoningByChat.set(Number(b.externalId), b.reasoning as ReasoningEffort)
       if (!b.threadId) continue
       const chatId = Number(b.externalId)
       this.chatToThread.set(chatId, b.threadId)

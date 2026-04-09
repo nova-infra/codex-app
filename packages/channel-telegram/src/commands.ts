@@ -21,6 +21,7 @@ export type CommandContext = {
   readonly getCwd: (threadId: string) => Promise<string>
   readonly newThread: (chatId: number) => Promise<string>
   readonly onConfigUpdate: (cfg: AppConfig) => void
+  readonly persistChatState: (chatId: number, patch: { model?: string; reasoning?: ReasoningEffort | '' }) => Promise<void>
 }
 
 export async function sendHelp(chatId: number, sender: TelegramSender): Promise<void> {
@@ -122,6 +123,7 @@ export async function handleModelCallback(
   chatId: number, cbId: string, model: string, ctx: CommandContext,
 ): Promise<void> {
   ctx.modelByChat.set(chatId, model)
+  await ctx.persistChatState(chatId, { model })
   await ctx.sender.answerCallbackQuery(cbId, '模型已更新')
   await ctx.sender.sendMessage(chatId, `当前模型：${model}`)
 }
@@ -131,6 +133,7 @@ export async function handleReasoningCallback(
 ): Promise<void> {
   if (REASONING_EFFORTS.includes(effort as ReasoningEffort)) {
     ctx.reasoningByChat.set(chatId, effort as ReasoningEffort)
+    await ctx.persistChatState(chatId, { reasoning: effort as ReasoningEffort })
     await ctx.sender.answerCallbackQuery(cbId, '推理深度已更新')
     await ctx.sender.sendMessage(chatId, `推理深度：${effort}`)
   } else {

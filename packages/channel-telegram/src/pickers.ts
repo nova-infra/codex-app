@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { basename } from 'node:path'
 import type { CodexClient } from '@codex-app/core'
 import { REASONING_EFFORTS, MODEL_PICKER_LIMIT } from '@/types'
@@ -9,7 +10,17 @@ function asRecord(v: unknown): Record<string, unknown> | null {
     : null
 }
 
-export type ThreadSummary = { id: string; title: string; workspace: string }
+export type ThreadSummary = {
+  id: string
+  title: string
+  workspace: string
+  workspaceLabel: string
+  workspaceKey: string
+}
+
+function toWorkspaceKey(workspace: string): string {
+  return createHash('sha1').update(workspace).digest('hex').slice(0, 16)
+}
 
 export async function listThreads(codex: CodexClient): Promise<ThreadSummary[]> {
   const res = asRecord(await codex.call('thread/list', { archived: false, limit: 20, sortKey: 'updated_at' }))
@@ -20,7 +31,14 @@ export async function listThreads(codex: CodexClient): Promise<ThreadSummary[]> 
     if (!id) return []
     const cwd = typeof r?.cwd === 'string' ? r.cwd.trim() : ''
     const name = typeof r?.name === 'string' ? r.name : typeof r?.preview === 'string' ? r.preview : id
-    return [{ id, title: name.slice(0, 64), workspace: cwd ? basename(cwd) : 'project' }]
+    const workspace = cwd || 'project'
+    return [{
+      id,
+      title: name.slice(0, 64),
+      workspace,
+      workspaceLabel: cwd ? basename(cwd) : 'project',
+      workspaceKey: toWorkspaceKey(workspace),
+    }]
   })
 }
 
@@ -32,10 +50,14 @@ export async function sendThreadPicker(chatId: number, codex: CodexClient, sende
   }
   const byWs = new Map<string, ThreadSummary[]>()
   for (const t of threads) {
-    const list = byWs.get(t.workspace) ?? []
-    byWs.set(t.workspace, [...list, t])
+    const list = byWs.get(t.workspaceKey) ?? []
+    byWs.set(t.workspaceKey, [...list, t])
   }
-  const rows = [...byWs.keys()].map(ws => [{ text: ws, callback_data: `ws:${ws}` }])
+  const rows = [...byWs.entries()].map(([workspaceKey, group]) => {
+    const first = group[0]
+    const suffix = group.length > 1 ? ` (${group.length})` : ''
+    return [{ text: `${first.workspaceLabel}${suffix}`, callback_data: `ws:${workspaceKey}` }]
+  })
   await sender.sendMessage(chatId, '选择工作空间：', { inline_keyboard: rows })
 }
 
