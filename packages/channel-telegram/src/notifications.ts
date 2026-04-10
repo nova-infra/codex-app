@@ -6,7 +6,7 @@
 import type { CodexClient } from '@codex-app/core'
 import type { TelegramSender } from '@/sender'
 import { createStreamingState, finalizeStreamingState, type StreamingState, type TelegramStreamingConfig } from '@/streaming'
-import { markdownToTelegramHtml, splitTelegramMessage } from '@/format'
+import { renderTelegramHtmlSegments } from '@/format'
 
 export type TurnProgress = {
   chatId: number
@@ -59,6 +59,11 @@ const TOOL_ICONS: Record<string, string> = {
   plan: '📋',
 }
 
+function foldProgressSteps(steps: readonly string[]): string[] {
+  if (steps.length <= 4) return [...steps]
+  return [`… 前 ${steps.length - 3} 步已折叠`, ...steps.slice(-3)]
+}
+
 function formatItemLabel(item: Record<string, unknown>): string | null {
   const type = typeof item.type === 'string' ? item.type : ''
   const icon = TOOL_ICONS[type] ?? ''
@@ -107,7 +112,7 @@ async function onItemStarted(threadId: string, params: unknown, ctx: Notificatio
 
   const progress = ctx.turnProgress.get(threadId)
   if (progress) {
-    const steps = [...progress.steps, `⏳ ${label}`]
+    const steps = foldProgressSteps([...progress.steps, `⏳ ${label}`])
     const now = Date.now()
     if (now - progress.lastEditAt > 800) {
       await ctx.sender.editMessageText(progress.chatId, progress.messageId, steps.join('\n'))
@@ -137,7 +142,7 @@ async function onItemCompleted(threadId: string, params: unknown, ctx: Notificat
   const label = formatItemLabel(item)
   if (!label) return
 
-  const steps = progress.steps.map(s => (s === `⏳ ${label}` ? `✅ ${label}` : s))
+  const steps = foldProgressSteps(progress.steps.map(s => (s === `⏳ ${label}` ? `✅ ${label}` : s)))
   const now = Date.now()
   if (now - progress.lastEditAt > 800) {
     await ctx.sender.editMessageText(progress.chatId, progress.messageId, steps.join('\n'))
@@ -224,18 +229,17 @@ async function onTurnCompleted(threadId: string, params: unknown, ctx: Notificat
 
   if (!raw) return
 
-  const html = markdownToTelegramHtml(raw)
-  const segments = splitTelegramMessage(html)
+  const segments = renderTelegramHtmlSegments(raw)
 
   if (progress) {
-    await ctx.sender.editMessageText(progress.chatId, progress.messageId, segments[0], 'HTML')
+    await ctx.sender.editHtmlMessage(progress.chatId, progress.messageId, segments[0])
     for (let i = 1; i < segments.length; i++) {
-      await ctx.sender.sendMessage(progress.chatId, segments[i], { parse_mode: 'HTML' })
+      await ctx.sender.sendHtmlMessage(progress.chatId, segments[i])
     }
   } else {
     for (const chatId of chatIds) {
       for (const seg of segments) {
-        await ctx.sender.sendMessage(chatId, seg, { parse_mode: 'HTML' })
+        await ctx.sender.sendHtmlMessage(chatId, seg)
       }
     }
   }

@@ -1,3 +1,4 @@
+import { telegramHtmlToPlainText } from '@/format'
 import type { InlineKeyboard } from '@/types'
 
 export const EDIT_INTERVAL_MS = 800
@@ -46,6 +47,24 @@ export class TelegramSender {
     }
   }
 
+  async sendHtmlMessage(chatId: number, html: string): Promise<number> {
+    try {
+      return await this.sendMessage(chatId, html, { parse_mode: 'HTML' })
+    } catch (err) {
+      if (!this.isFormattingError(err)) throw err
+      return await this.sendMessage(chatId, telegramHtmlToPlainText(html))
+    }
+  }
+
+  async editHtmlMessage(chatId: number, messageId: number, html: string): Promise<void> {
+    try {
+      await this.editMessageText(chatId, messageId, html, 'HTML')
+    } catch (err) {
+      if (!this.isFormattingError(err)) throw err
+      await this.editMessageText(chatId, messageId, telegramHtmlToPlainText(html))
+    }
+  }
+
   async deleteMessage(chatId: number, messageId: number): Promise<void> {
     if (!messageId) return
     await this.post('deleteMessage', { chat_id: chatId, message_id: messageId })
@@ -83,6 +102,17 @@ export class TelegramSender {
 
   private url(method: string): string {
     return `https://api.telegram.org/bot${this.token}/${method}`
+  }
+
+  private isFormattingError(err: unknown): boolean {
+    const message = err instanceof Error ? err.message : String(err)
+    return [
+      "can't parse entities",
+      'unsupported start tag',
+      "can't find end tag",
+      'message is too long',
+      'entity end',
+    ].some(fragment => message.includes(fragment))
   }
 
   private isNoopEditError(err: unknown): boolean {

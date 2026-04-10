@@ -3,6 +3,7 @@ import type { TokenGuard } from '@codex-app/core'
 import type { TelegramUpdate, ReasoningEffort } from '@/types'
 import { BOT_COMMANDS } from '@/types'
 import { TelegramSender } from '@/sender'
+import { buildTelegramTurnText } from '@/channelText'
 import {
   listThreads, sendThreadPicker, sendModelPicker,
   sendReasoningPicker, extractLatestAssistantText,
@@ -323,8 +324,9 @@ export class TelegramAdapter {
     threadId: string, text: string,
     photo: TelegramUpdate['message']['photo'], chatId: number,
   ): Promise<void> {
-    const input: Array<Record<string, unknown>> = []
-    if (text) input.push({ type: 'text', text })
+    const input: Array<Record<string, unknown>> = [
+      { type: 'text', text: buildTelegramTurnText(text) },
+    ]
     if (photo?.length) {
       const best = [...photo].sort((a, b) => (a.width ?? 0) - (b.width ?? 0))
         .find(p => (p.width ?? 0) >= 400) ?? photo[photo.length - 1]
@@ -333,7 +335,6 @@ export class TelegramAdapter {
         input.push({ type: 'image', url, image_url: url })
       }
     }
-    if (!input.length) input.push({ type: 'text', text: '[空消息]' })
     const params: Record<string, unknown> = { threadId, input }
     const model = this.modelByChat.get(chatId)
     const reasoning = this.reasoningByChat.get(chatId)

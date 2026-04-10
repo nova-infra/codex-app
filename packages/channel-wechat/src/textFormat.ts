@@ -8,6 +8,7 @@ import { normalizeCdnMedia } from '@/cdnCrypto'
 
 const DEFAULT_CHUNK = 4000
 const CODE_INDENT = '    '
+const SUMMARY_LIMIT = 120
 
 // ── Format ──────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,19 @@ export function formatAssistantTextForWeChat(text: string): string {
   out = out.replace(/\n{3,}/g, '\n\n')
 
   return out.trim()
+}
+
+export function buildWeChatSummaryFromFormatted(text: string, maxLen = SUMMARY_LIMIT): string {
+  const paragraphs = text
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  const picked = paragraphs.find((part) => !part.startsWith(CODE_INDENT)) ?? paragraphs[0] ?? ''
+  const singleLine = picked.replace(/\n+/g, ' ').trim()
+  if (!singleLine) return ''
+  return singleLine.length > maxLen
+    ? `${singleLine.slice(0, maxLen - 1).trim()}…`
+    : singleLine
 }
 
 // ── Split ────────────────────────────────────────────────────────────────────

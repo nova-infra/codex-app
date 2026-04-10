@@ -3,15 +3,17 @@
  * Handles: message routing, slash commands, approval menus, token binding, notification dispatch.
  */
 
-import { basename } from 'node:path'
 import type { CodexClient } from '@codex-app/core'
 import type { AppConfig } from '@codex-app/core'
 import type { ILinkIncomingMessage, ILinkMessageItem } from '@/iLinkClient'
 import { WechatSender } from '@/sender'
 import { collectInboundTextForCodex, hasWeChatRichMediaForCommands } from '@/textFormat'
 import { buildCodexTurnInputFromWeChatItems } from '@/turnInput'
-import { findBinding, saveBinding, updateBinding } from '@codex-app/core'
+import { findBinding, loadAllBindings, saveBinding, updateBinding } from '@codex-app/core'
 import type { PollerStatus } from '@/polling'
+import { extractWechatErrorMessage, formatWechatItemProgress } from '@/progressText'
+import { handleCxText, handleModelCommand, handleReasoningCommand, sendHelp, sendStatus, sendThreadPicker } from '@/commands'
+import type { AccountManager } from '@codex-app/codex-account'
 
 const DEFAULT_CDN_BASE = 'https://novac2c.cdn.weixin.qq.com/c2c'
 
@@ -58,6 +60,9 @@ export class WechatAdapter {
   private readonly inboundDedup = new Map<string, number>()
   private readonly lastForwardedTurn = new Map<string, string>()
   private readonly lastForwardedSig = new Map<string, string>()
+  private readonly progressByChatId = new Map<string, { text: string; at: number }>()
+  private readonly modelByChatId = new Map<string, string>()
+  private readonly reasoningByChatId = new Map<string, string>()
   private readonly pendingTokenBind = new Set<string>()
   private readonly pendingApprovals = new Map<string, { id: number; method: string }>()
   private notificationUnsub: (() => void) | null = null
@@ -67,6 +72,7 @@ export class WechatAdapter {
     private readonly sender: WechatSender,
     private readonly config: AppConfig,
     private readonly getPollerStatus: () => PollerStatus,
+    private readonly accountManager: AccountManager | null = null,
   ) {}
 
   private async resolveCwd(chatId: string): Promise<string> {
@@ -75,6 +81,7 @@ export class WechatAdapter {
   }
 
   start(): void {
+    void this.restoreChatState().catch(() => {})
     this.notificationUnsub?.()
     this.notificationUnsub = this.codex.onNotification((n) => {
       void this.handleNotification(n).catch(() => {})
@@ -85,6 +92,10 @@ export class WechatAdapter {
     this.notificationUnsub?.()
     this.notificationUnsub = null
     this.sender.clearAllTypingTimers()
+  }
+
+  async notifyChat(chatId: string, text: string): Promise<void> {
+    await this.sendRaw(chatId, text)
   }
 
   async handleMessage(msg: ILinkIncomingMessage): Promise<void> {
@@ -137,24 +148,34 @@ export class WechatAdapter {
     this.sender.beginTypingRefresh(chatId, contextToken)
     try {
       const threadId = await this.ensureThread(chatId)
-      await this.codex.call('turn/start', { threadId, input })
+      await this.sendProgress(chatId, '已收到，处理中…', true)
+      const params: Record<string, unknown> = { threadId, input }
+      const model = this.modelByChatId.get(chatId)
+      const reasoning = this.reasoningByChatId.get(chatId)
+      if (model) params.model = model
+      if (reasoning) params.effort = reasoning
+      await this.codex.call('turn/start', params)
     } catch (error) {
       this.sender.endTypingIndicator(chatId, contextToken)
+      this.progressByChatId.delete(chatId)
       const errMsg = error instanceof Error ? error.message : 'Failed to forward message'
       await this.sendRaw(chatId, `发送失败: ${errMsg}`)
     }
   }
 
   private async handleSlashCommand(chatId: string, cmd: string): Promise<boolean> {
-    if (cmd === '/start' || cmd === '/help') { await this.sendHelp(chatId); return true }
+    if (cmd === '/start' || cmd === '/help') { await sendHelp(chatId, this.commandCtx()); return true }
     if (cmd === '/new' || cmd === '/newthread') {
       const threadId = await this.createThread(chatId)
       const cwd = await this.readThreadCwd(threadId)
       await this.sendRaw(chatId, `已新建会话：${threadId}${cwd ? `\n当前目录：${cwd}` : ''}`)
       return true
     }
-    if (cmd === '/session') { await this.sendThreadPicker(chatId); return true }
-    if (cmd === '/status') { await this.sendStatus(chatId); return true }
+    if (cmd === '/session') { await sendThreadPicker(chatId, this.commandCtx()); return true }
+    if (cmd === '/status') { await sendStatus(chatId, this.commandCtx()); return true }
+    if (await handleModelCommand(chatId, cmd, this.commandCtx())) return true
+    if (await handleReasoningCommand(chatId, cmd, this.commandCtx())) return true
+    if (await handleCxText(chatId, cmd, this.commandCtx())) return true
     const threadMatch = cmd.match(/^\/thread\s+(\S+)$/)
     if (threadMatch) {
       const threadId = threadMatch[1]
@@ -204,6 +225,28 @@ export class WechatAdapter {
       }
       return
     }
+    if (notification.method === 'item/started') {
+      const threadId = this.extractThreadId(notification)
+      if (!threadId) return
+      const chatIds = this.chatIdsByThreadId.get(threadId)
+      const text = formatWechatItemProgress(notification.params)
+      if (!chatIds || !text) return
+      for (const chatId of chatIds) await this.sendProgress(chatId, text)
+      return
+    }
+    if (notification.method === 'error') {
+      const threadId = this.extractThreadId(notification)
+      if (!threadId) return
+      const chatIds = this.chatIdsByThreadId.get(threadId)
+      if (!chatIds || chatIds.size === 0) return
+      const message = `处理失败：${extractWechatErrorMessage(notification.params)}`
+      for (const chatId of chatIds) {
+        this.progressByChatId.delete(chatId)
+        this.sender.endTypingIndicator(chatId, this.contextTokenByChatId.get(chatId) ?? '')
+        await this.sendRaw(chatId, message)
+      }
+      return
+    }
     if (notification.method !== 'turn/completed') return
     const threadId = this.extractThreadId(notification)
     if (!threadId) return
@@ -218,6 +261,7 @@ export class WechatAdapter {
     if (!text || (signature && this.lastForwardedSig.get(threadId) === signature)) { endTyping(); return }
     for (const cid of chatIds) {
       const token = this.contextTokenByChatId.get(cid) ?? ''
+      this.progressByChatId.delete(cid)
       await this.sender.sendAssistantReply(cid, token, text)
       this.sender.endTypingIndicator(cid, token)
     }
@@ -239,7 +283,10 @@ export class WechatAdapter {
   }
 
   private async createThread(chatId: string): Promise<string> {
-    const response = asRecord(await this.codex.call('thread/start', { cwd: await this.resolveCwd(chatId) }))
+    const params: Record<string, unknown> = { cwd: await this.resolveCwd(chatId) }
+    const model = this.modelByChatId.get(chatId)
+    if (model) params.model = model
+    const response = asRecord(await this.codex.call('thread/start', params))
     const thread = asRecord(response?.thread)
     const threadId = typeof thread?.id === 'string' ? thread.id : ''
     if (!threadId) throw new Error('thread/start did not return thread id')
@@ -258,6 +305,7 @@ export class WechatAdapter {
     const ids = this.chatIdsByThreadId.get(threadId) ?? new Set<string>()
     ids.add(chatId)
     this.chatIdsByThreadId.set(threadId, ids)
+    void updateBinding('wechat', chatId, { threadId }).catch(() => {})
   }
 
   private async readThreadCwd(threadId: string): Promise<string> {
@@ -274,55 +322,48 @@ export class WechatAdapter {
     try { await this.sender.sendText(chatId, token, text) } catch { /* best-effort */ }
   }
 
-  private async sendHelp(chatId: string): Promise<void> {
-    const lines = ['可用指令：', '/new - 新建会话', '/session - 选择会话', '/status - 查看状态', '/help - 查看指令说明']
-    const threadId = this.threadIdByChatId.get(chatId)
-    if (threadId) {
-      const cwd = await this.readThreadCwd(threadId)
-      lines.push('', `当前绑定会话：${threadId}`, cwd ? `当前目录：${cwd}` : '当前目录：（未设置）')
+  private async sendProgress(chatId: string, text: string, force = false): Promise<void> {
+    const token = this.contextTokenByChatId.get(chatId) ?? ''
+    if (!token) return
+    const now = Date.now()
+    const prev = this.progressByChatId.get(chatId)
+    if (!force) {
+      if (prev?.text === text) return
+      if (prev && now - prev.at < 2500) return
     }
-    await this.sendRaw(chatId, lines.join('\n'))
+    this.progressByChatId.set(chatId, { text, at: now })
+    await this.sender.sendProgress(chatId, token, text)
   }
 
-  private async sendStatus(chatId: string): Promise<void> {
-    const lines = ['状态：']
-    const threadId = this.threadIdByChatId.get(chatId)
-    if (threadId) {
-      const cwd = await this.readThreadCwd(threadId)
-      lines.push(`会话：${threadId}`, `目录：${cwd || '（未设置）'}`)
-    } else { lines.push('会话：（未绑定）') }
-    const poller = this.getPollerStatus()
-    lines.push(
-      `登录状态：${poller.loginState}`,
-      `已配置：${poller.configured ? '是' : '否'}`,
-      `baseUrl：${poller.baseUrl || '（未设置）'}`,
-    )
-    if (poller.lastError) lines.push(`最近错误：${poller.lastError}`)
-    await this.sendRaw(chatId, lines.join('\n'))
+  private commandCtx() {
+    return {
+      codex: this.codex,
+      accountManager: this.accountManager,
+      getPollerStatus: this.getPollerStatus,
+      sendRaw: (chatId: string, text: string) => this.sendRaw(chatId, text),
+      getThreadId: (chatId: string) => this.threadIdByChatId.get(chatId),
+      getModel: (chatId: string) => this.modelByChatId.get(chatId),
+      getReasoning: (chatId: string) => this.reasoningByChatId.get(chatId),
+      readThreadCwd: (threadId: string) => this.readThreadCwd(threadId),
+      setModel: async (chatId: string, model: string) => {
+        this.modelByChatId.set(chatId, model)
+        await updateBinding('wechat', chatId, { model })
+      },
+      setReasoning: async (chatId: string, effort: string) => {
+        this.reasoningByChatId.set(chatId, effort)
+        await updateBinding('wechat', chatId, { reasoning: effort })
+      },
+    }
   }
 
-  private async sendThreadPicker(chatId: string): Promise<void> {
-    const payload = asRecord(await this.codex.call('thread/list', { archived: false, limit: 20, sortKey: 'updated_at' }))
-    const rows = Array.isArray(payload?.data) ? payload.data : []
-    const current = this.threadIdByChatId.get(chatId)
-    const byWs = new Map<string, Array<{ id: string; title: string }>>()
-    for (const row of rows) {
-      const r = asRecord(row)
-      const id = typeof r?.id === 'string' ? r.id.trim() : ''
-      if (!id) continue
-      const name = (typeof r?.name === 'string' ? r.name : '') || (typeof r?.preview === 'string' ? r.preview : '') || id
-      const ws = typeof r?.cwd === 'string' && r.cwd ? basename(r.cwd) : '(未设置)'
-      const list = byWs.get(ws) ?? []
-      list.push({ id, title: `${ws}/${name.slice(0, 40)}` })
-      byWs.set(ws, list)
+  private async restoreChatState(): Promise<void> {
+    const bindings = await loadAllBindings('wechat')
+    for (const binding of bindings) {
+      const chatId = binding.externalId
+      if (binding.model) this.modelByChatId.set(chatId, binding.model)
+      if (binding.reasoning) this.reasoningByChatId.set(chatId, binding.reasoning)
+      if (binding.threadId) this.bindChatToThread(chatId, binding.threadId)
     }
-    const parts: string[] = []
-    for (const [ws, items] of byWs) {
-      parts.push(`【${ws}】`)
-      for (const t of items) parts.push(`  ${t.id === current ? '✓ ' : ''}${t.title}\n  /thread ${t.id}`)
-      parts.push('')
-    }
-    await this.sendRaw(chatId, parts.length ? `选择会话：\n\n${parts.join('\n')}` : '没有会话。发送 /new 创建。')
   }
 
   private extractThreadId(n: { params: unknown }): string {

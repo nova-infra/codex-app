@@ -6,7 +6,7 @@ export type LoginCompleteHandler = (ctx: ChannelCallbackContext, email: string) 
 
 class CallbackRegistry {
   private readonly pending = new Map<string, ChannelCallbackContext>()
-  private onLoginComplete?: LoginCompleteHandler
+  private readonly loginHandlers = new Set<LoginCompleteHandler>()
 
   /** 存储 state → context 映射 */
   register(ctx: ChannelCallbackContext): void {
@@ -28,7 +28,7 @@ class CallbackRegistry {
 
   /** 注册 OAuth 成功后的通知 handler */
   onLogin(handler: LoginCompleteHandler): void {
-    this.onLoginComplete = handler
+    this.loginHandlers.add(handler)
   }
 
   /**
@@ -37,8 +37,8 @@ class CallbackRegistry {
    */
   notifyLogin(state: string, email: string): void {
     const ctx = this.resolve(state)
-    if (!ctx || !this.onLoginComplete) return
-    this.onLoginComplete(ctx, email)
+    if (!ctx || this.loginHandlers.size === 0) return
+    for (const handler of this.loginHandlers) handler(ctx, email)
   }
 
   /** 清理超过 TTL 的条目 */

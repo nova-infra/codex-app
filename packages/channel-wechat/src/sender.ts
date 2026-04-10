@@ -4,7 +4,7 @@
 
 import { randomBytes, createHash } from 'node:crypto'
 import { ILinkClient, type ILinkCdnMedia } from '@/iLinkClient'
-import { formatAssistantTextForWeChat, splitWeChatTextSegments } from '@/textFormat'
+import { buildWeChatSummaryFromFormatted, formatAssistantTextForWeChat, splitWeChatTextSegments } from '@/textFormat'
 import { uploadWeChatCdnEncrypted } from '@/cdnCrypto'
 
 const ASSISTANT_TEXT_CHUNK = 4000
@@ -45,8 +45,20 @@ export class WechatSender {
     }
     const formatted = formatAssistantTextForWeChat(text)
     const segments = splitWeChatTextSegments(formatted, ASSISTANT_TEXT_CHUNK)
+    if (segments.length > 1) {
+      const summary = buildWeChatSummaryFromFormatted(formatted)
+      if (summary) {
+        try {
+          await this.client.sendText(chatId, contextToken, `结果摘要：${summary}`)
+        } catch (error) {
+          this.lastError = error instanceof Error ? error.message : 'Failed to send WeChat message'
+          return
+        }
+      }
+    }
     for (const segment of segments) {
-      const chunk = segment.trim()
+      const prefix = segments.length > 1 && segment === segments[0] ? '详细内容：\n' : ''
+      const chunk = `${prefix}${segment}`.trim()
       if (!chunk) continue
       try {
         await this.client.sendText(chatId, contextToken, chunk)
@@ -54,6 +66,15 @@ export class WechatSender {
         this.lastError = error instanceof Error ? error.message : 'Failed to send WeChat message'
         return
       }
+    }
+  }
+
+  async sendProgress(chatId: string, contextToken: string, text: string): Promise<void> {
+    if (!contextToken.trim()) return
+    try {
+      await this.client.sendText(chatId, contextToken, text.trim())
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : 'Failed to send WeChat progress'
     }
   }
 

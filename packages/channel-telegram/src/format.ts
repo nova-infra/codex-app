@@ -150,6 +150,60 @@ export function markdownToTelegramHtml(md: string): string {
   return text.trimEnd()
 }
 
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+}
+
+function splitTelegramMarkdown(md: string, maxLen = 3200): readonly string[] {
+  const trimmed = md.trim()
+  if (!trimmed) return []
+  if (trimmed.length <= maxLen) return [trimmed]
+
+  const chunks: string[] = []
+  let remaining = trimmed
+
+  while (remaining.length > maxLen) {
+    let splitAt = remaining.lastIndexOf('\n\n', maxLen)
+    if (splitAt > 0) {
+      splitAt += 2
+    } else {
+      splitAt = remaining.lastIndexOf('\n', maxLen)
+      if (splitAt > 0) {
+        splitAt += 1
+      } else {
+        splitAt = maxLen
+      }
+    }
+    chunks.push(remaining.slice(0, splitAt).trim())
+    remaining = remaining.slice(splitAt).trim()
+  }
+
+  if (remaining) chunks.push(remaining)
+  return chunks
+}
+
+export function renderTelegramHtmlSegments(md: string, maxMarkdownLen = 3200): readonly string[] {
+  return splitTelegramMarkdown(md, maxMarkdownLen)
+    .map(chunk => markdownToTelegramHtml(chunk))
+    .filter(Boolean)
+}
+
+export function telegramHtmlToPlainText(html: string): string {
+  const text = html
+    .replace(/<pre><code[^>]*>/g, '```\n')
+    .replace(/<\/code><\/pre>/g, '\n```')
+    .replace(/<blockquote>/g, '')
+    .replace(/<\/blockquote>/g, '')
+    .replace(/<br\s*\/?>/g, '\n')
+    .replace(/<\/p>/g, '\n')
+    .replace(/<[^>]+>/g, '')
+  return decodeHtmlEntities(text).replace(/\n{3,}/g, '\n\n').trim()
+}
+
 // ---------------------------------------------------------------------------
 // Message splitter
 // ---------------------------------------------------------------------------
