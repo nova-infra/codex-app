@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Codex App",
+    "slug": "codex-app-rn-client",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "codexapp",
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.codexapp.mobile"
+    },
+    "android": {
+      "package": "com.codexapp.mobile",
+      "predictiveBackGestureEnabled": false
+    },
+    "extra": {
+      "router": {}
+    }
+  }
+}

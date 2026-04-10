@@ -1,4 +1,8 @@
 node_modules/
+.expo/
+.expo-shared/
+apps/*/.expo/
+apps/*/dist/
 dist/
 codex-app-server
 *.log

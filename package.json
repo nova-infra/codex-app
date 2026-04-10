@@ -1,9 +1,12 @@
 {
   "name": "codex-app",
   "private": true,
-  "workspaces": ["packages/*"],
+  "workspaces": ["packages/*", "apps/*"],
   "scripts": {
     "dev": "bun run packages/server/src/index.ts",
+    "dev:rn": "bun run --cwd apps/rn-client start",
+    "dev:rn:ios": "bun run --cwd apps/rn-client ios",
+    "dev:rn:android": "bun run --cwd apps/rn-client android",
     "build": "bun build packages/server/src/index.ts --compile --outfile codex-app-server",
     "graphify": "bash scripts/graphify.sh",
     "changeset": "changeset",
