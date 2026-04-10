@@ -114,7 +114,6 @@ export class AccountManager {
 
     const tokens = await refreshTokens(account.refreshToken)
     await this.updateTokens(accountId, tokens)
-    this.usageCache.delete(accountId)
 
     const updated = this.data.accounts.find(a => a.id === accountId)!
     return this.toMasked(updated)
