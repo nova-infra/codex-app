@@ -38,7 +38,12 @@ export class TelegramSender {
       text: text.trim(),
     }
     if (parseMode) body.parse_mode = parseMode
-    await this.post('editMessageText', body)
+    try {
+      await this.post('editMessageText', body)
+    } catch (err) {
+      if (this.isNoopEditError(err)) return
+      throw err
+    }
   }
 
   async deleteMessage(chatId: number, messageId: number): Promise<void> {
@@ -78,6 +83,11 @@ export class TelegramSender {
 
   private url(method: string): string {
     return `https://api.telegram.org/bot${this.token}/${method}`
+  }
+
+  private isNoopEditError(err: unknown): boolean {
+    const message = err instanceof Error ? err.message : String(err)
+    return message.includes('message is not modified')
   }
 
   private async post(method: string, body: Record<string, unknown>): Promise<unknown> {
