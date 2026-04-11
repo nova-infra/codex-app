@@ -15,6 +15,7 @@ export type TokenEntry = {
 
 export type TelegramConfig = {
   readonly botToken: string
+  readonly renderMode?: 'classic' | 'hermes'
 }
 
 export type WechatConfig = {

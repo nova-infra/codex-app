@@ -1,4 +1,4 @@
-import { renderTelegramHtmlSegments } from '@/format'
+import { renderTelegramMarkdownSegments } from '@/format'
 import type { TelegramSender } from '@/sender'
 
 export type StreamEditorConfig = {
@@ -98,7 +98,7 @@ export class EditStreamEditor {
 
     if (this.activeMessageId !== null && !this.fallen) {
       try {
-        await this.sender.editHtmlMessage(
+        await this.sender.editRichMessage(
           this.chatId,
           this.activeMessageId,
           firstSegment,
@@ -131,12 +131,12 @@ export class EditStreamEditor {
 
   private renderFinalSegments(): string[] {
     if (!this.fullRawText.trim()) return []
-    return [...renderTelegramHtmlSegments(this.fullRawText)]
+    return [...renderTelegramMarkdownSegments(this.fullRawText)]
   }
 
   private async sendHtmlSegments(segments: readonly string[]): Promise<void> {
     for (const seg of segments) {
-      await this.sender.sendHtmlMessage(this.chatId, seg)
+      await this.sender.sendRichMessage(this.chatId, seg)
     }
   }
 

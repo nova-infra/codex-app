@@ -80,6 +80,7 @@ export class TelegramAdapter {
       stopTyping: chatId => this.stopTyping(chatId),
       readLatestReply: threadId => this.readLatestReply(threadId),
       streamingConfig: this.config.streaming,
+      renderMode: this.config.telegram?.renderMode ?? 'classic',
     }
   }
 

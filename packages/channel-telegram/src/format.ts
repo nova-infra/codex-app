@@ -158,7 +158,7 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&quot;/g, '"')
 }
 
-function splitTelegramMarkdown(md: string, maxLen = 3200): readonly string[] {
+export function splitTelegramMarkdown(md: string, maxLen = 3200): readonly string[] {
   const trimmed = md.trim()
   if (!trimmed) return []
   if (trimmed.length <= maxLen) return [trimmed]
@@ -189,6 +189,54 @@ function splitTelegramMarkdown(md: string, maxLen = 3200): readonly string[] {
 export function renderTelegramHtmlSegments(md: string, maxMarkdownLen = 3200): readonly string[] {
   return splitTelegramMarkdown(md, maxMarkdownLen)
     .map(chunk => markdownToTelegramHtml(chunk))
+    .filter(Boolean)
+}
+
+const MDV2_PLACEHOLDER_RE = /(\x00(?:CB|IC)\d+\x00)/g
+const MDV2_ESCAPE_RE = /([_*\[\]()~`>#\+\-=|{}.!\\])/g
+
+function escapeMarkdownV2(text: string): string {
+  return text.replace(MDV2_ESCAPE_RE, '\\$1')
+}
+
+export function markdownToTelegramMarkdownV2(md: string): string {
+  const codeBlocks: string[] = []
+  const inlineCodes: string[] = []
+
+  let text = md.replace(/```(\w*)\n?([\s\S]*?)```/g, (_match, lang: string, body: string) => {
+    const fence = lang ? `\`\`\`${lang}\n${body.replace(/\n$/, '')}\n\`\`\`` : `\`\`\`\n${body.replace(/\n$/, '')}\n\`\`\``
+    const idx = codeBlocks.push(fence) - 1
+    return `\x00CB${idx}\x00`
+  })
+
+  text = text.replace(/`([^`\n]+)`/g, (_match, code: string) => {
+    const idx = inlineCodes.push(`\`${code}\``) - 1
+    return `\x00IC${idx}\x00`
+  })
+
+  const isPlaceholder = (part: string): boolean => /^\x00(?:CB|IC)\d+\x00$/.test(part)
+
+  text = text
+    .split(MDV2_PLACEHOLDER_RE)
+    .map(part => (isPlaceholder(part) ? part : escapeMarkdownV2(part)))
+    .join('')
+
+  text = text
+    .replace(/^#{1,6}\s+(.+)$/gm, '*$1*')
+    .replace(/^(\s*)[-*]\s+(.+)$/gm, '$1• $2')
+    .replace(/\*\*(.+?)\*\*/g, '*$1*')
+    .replace(/__(.+?)__/g, '*$1*')
+    .replace(/~~(.+?)~~/g, '~$1~')
+
+  text = text.replace(/\x00IC(\d+)\x00/g, (_m, i) => inlineCodes[Number(i)] ?? '')
+  text = text.replace(/\x00CB(\d+)\x00/g, (_m, i) => codeBlocks[Number(i)] ?? '')
+
+  return text.trim()
+}
+
+export function renderTelegramMarkdownSegments(md: string, maxMarkdownLen = 3200): readonly string[] {
+  return splitTelegramMarkdown(md, maxMarkdownLen)
+    .map(chunk => markdownToTelegramMarkdownV2(chunk))
     .filter(Boolean)
 }
 

@@ -1,4 +1,4 @@
-import { telegramHtmlToPlainText } from '@/format'
+import { markdownToTelegramHtml, markdownToTelegramMarkdownV2, telegramHtmlToPlainText } from '@/format'
 import type { InlineKeyboard } from '@/types'
 
 export const EDIT_INTERVAL_MS = 800
@@ -63,6 +63,43 @@ export class TelegramSender {
       if (!this.isFormattingError(err)) throw err
       await this.editMessageText(chatId, messageId, telegramHtmlToPlainText(html))
     }
+  }
+
+  async sendRichMessage(chatId: number, markdown: string): Promise<number> {
+    try {
+      return await this.sendMessage(chatId, markdownToTelegramMarkdownV2(markdown), { parse_mode: 'MarkdownV2' })
+    } catch (err) {
+      if (!this.isFormattingError(err)) throw err
+    }
+    try {
+      return await this.sendHtmlMessage(chatId, markdownToTelegramHtml(markdown))
+    } catch (err) {
+      if (!this.isFormattingError(err)) throw err
+      return await this.sendMessage(chatId, markdown)
+    }
+  }
+
+  async editRichMessage(chatId: number, messageId: number, markdown: string): Promise<void> {
+    try {
+      await this.editMessageText(chatId, messageId, markdownToTelegramMarkdownV2(markdown), 'MarkdownV2')
+      return
+    } catch (err) {
+      if (!this.isFormattingError(err)) throw err
+    }
+    try {
+      await this.editHtmlMessage(chatId, messageId, markdownToTelegramHtml(markdown))
+    } catch (err) {
+      if (!this.isFormattingError(err)) throw err
+      await this.editMessageText(chatId, messageId, markdown)
+    }
+  }
+
+  async sendPhoto(chatId: number, imageUrl: string, caption?: string): Promise<number> {
+    const body: Record<string, unknown> = { chat_id: chatId, photo: imageUrl }
+    if (caption?.trim()) body.caption = caption.trim()
+    const data = asRecord(await this.post('sendPhoto', body))
+    const result = asRecord(data?.result)
+    return typeof result?.message_id === 'number' ? result.message_id : 0
   }
 
   async deleteMessage(chatId: number, messageId: number): Promise<void> {

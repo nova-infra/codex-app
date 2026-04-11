@@ -6,7 +6,7 @@
 import type { CodexClient } from '@codex-app/core'
 import type { TelegramSender } from '@/sender'
 import { createStreamingState, finalizeStreamingState, type StreamingState, type TelegramStreamingConfig } from '@/streaming'
-import { renderTelegramHtmlSegments } from '@/format'
+import { renderTelegramHtmlSegments, renderTelegramMarkdownSegments } from '@/format'
 
 export type TurnProgress = {
   chatId: number
@@ -25,6 +25,7 @@ export type NotificationContext = {
   readonly stopTyping: (chatId: number) => void
   readonly readLatestReply: (threadId: string) => Promise<string>
   readonly streamingConfig?: TelegramStreamingConfig
+  readonly renderMode: 'classic' | 'hermes'
 }
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -47,7 +48,7 @@ function extractThreadId(n: { readonly params: unknown }): string {
   return typeof turn?.thread_id === 'string' ? turn.thread_id : ''
 }
 
-const TOOL_ICONS: Record<string, string> = {
+const TOOL_ICONS_CLASSIC: Record<string, string> = {
   commandExecution: '🔧',
   fileChange: '📝',
   mcpToolCall: '🔌',
@@ -59,20 +60,34 @@ const TOOL_ICONS: Record<string, string> = {
   plan: '📋',
 }
 
+const TOOL_ICONS_HERMES: Record<string, string> = {
+  commandExecution: '⚙️',
+  fileChange: '✏️',
+  mcpToolCall: '🧰',
+  webSearch: '🔎',
+  reasoning: '🧠',
+  imageView: '🖼️',
+  imageGeneration: '🖼️',
+  dynamicToolCall: '🛠️',
+  plan: '📌',
+}
+
 function foldProgressSteps(steps: readonly string[]): string[] {
   if (steps.length <= 4) return [...steps]
   return [`… 前 ${steps.length - 3} 步已折叠`, ...steps.slice(-3)]
 }
 
-function formatItemLabel(item: Record<string, unknown>): string | null {
+function formatItemLabel(item: Record<string, unknown>, mode: 'classic' | 'hermes'): string | null {
   const type = typeof item.type === 'string' ? item.type : ''
-  const icon = TOOL_ICONS[type] ?? ''
+  const icons = mode === 'hermes' ? TOOL_ICONS_HERMES : TOOL_ICONS_CLASSIC
+  const icon = icons[type] ?? ''
   if (!icon) return null
 
   switch (type) {
     case 'commandExecution': {
       const cmd = typeof item.command === 'string' ? item.command : ''
-      return `${icon} ${cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd || '执行命令'}`
+      const text = cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd || '执行命令'
+      return mode === 'hermes' ? `${icon} Running: ${text}` : `${icon} ${text}`
     }
     case 'fileChange': {
       const changes = Array.isArray(item.changes) ? item.changes : []
@@ -80,21 +95,62 @@ function formatItemLabel(item: Record<string, unknown>): string | null {
       const file = typeof first?.filePath === 'string' ? first.filePath : ''
       const name = file ? file.split('/').pop() : ''
       const label = name ? `修改 ${name}` : '修改文件'
-      return changes.length > 1 ? `${icon} ${label} (+${changes.length - 1})` : `${icon} ${label}`
+      const text = changes.length > 1 ? `${label} (+${changes.length - 1})` : label
+      return mode === 'hermes' ? `${icon} Editing: ${text}` : `${icon} ${text}`
     }
     case 'mcpToolCall': {
       const tool = typeof item.tool === 'string' ? item.tool : ''
       const server = typeof item.server === 'string' ? item.server : ''
-      return `${icon} ${tool || server || '工具调用'}`
+      const text = tool || server || '工具调用'
+      return mode === 'hermes' ? `${icon} Tool: ${text}` : `${icon} ${text}`
     }
     case 'webSearch':
-      return `${icon} 搜索网页`
+      return mode === 'hermes' ? `${icon} Search in progress` : `${icon} 搜索网页`
     case 'reasoning':
-      return `${icon} Thinking...`
+      return mode === 'hermes' ? `${icon} Thinking` : `${icon} Thinking...`
     case 'plan':
-      return `${icon} 制定计划`
+      return mode === 'hermes' ? `${icon} Planning` : `${icon} 制定计划`
     default:
       return `${icon} ${type}`
+  }
+}
+
+function collectImageUrls(value: unknown): string[] {
+  if (typeof value === 'string') {
+    const text = value.trim()
+    return /^https?:\/\//.test(text) ? [text] : []
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(collectImageUrls)
+  }
+  const rec = asRecord(value)
+  if (!rec) return []
+  return [
+    ...collectImageUrls(rec.imageUrl),
+    ...collectImageUrls(rec.image_url),
+    ...collectImageUrls(rec.full_url),
+    ...collectImageUrls(rec.url),
+    ...collectImageUrls(rec.result),
+    ...collectImageUrls(rec.output),
+    ...collectImageUrls(rec.content),
+    ...collectImageUrls(rec.item),
+  ]
+}
+
+async function maybeSendImage(threadId: string, params: unknown, ctx: NotificationContext): Promise<void> {
+  if (!threadId) return
+  const chatIds = ctx.threadToChats.get(threadId)
+  if (!chatIds?.size) return
+  const item = asRecord(asRecord(params)?.item)
+  if (!item) return
+  const type = typeof item.type === 'string' ? item.type : ''
+  if (type !== 'imageGeneration' && type !== 'imageView') return
+  const urls = [...new Set(collectImageUrls(item))]
+  if (!urls.length) return
+  for (const chatId of chatIds) {
+    for (const url of urls.slice(0, 4)) {
+      await ctx.sender.sendPhoto(chatId, url)
+    }
   }
 }
 
@@ -107,12 +163,13 @@ async function onItemStarted(threadId: string, params: unknown, ctx: Notificatio
   if (!item) return
   console.log(`[telegram] item/started type=${item.type} cmd=${typeof item.command === 'string' ? item.command.slice(0, 40) : ''}`)
 
-  const label = formatItemLabel(item)
+  const label = formatItemLabel(item, ctx.renderMode)
   if (!label) return
 
   const progress = ctx.turnProgress.get(threadId)
   if (progress) {
-    const steps = foldProgressSteps([...progress.steps, `⏳ ${label}`])
+    const marker = ctx.renderMode === 'hermes' ? '•' : '⏳'
+    const steps = foldProgressSteps([...progress.steps, `${marker} ${label}`])
     const now = Date.now()
     if (now - progress.lastEditAt > 800) {
       await ctx.sender.editMessageText(progress.chatId, progress.messageId, steps.join('\n'))
@@ -122,10 +179,11 @@ async function onItemStarted(threadId: string, params: unknown, ctx: Notificatio
     }
   } else {
     const chatId = chatIds.values().next().value!
-    const msgId = await ctx.sender.sendMessage(chatId, `⏳ ${label}`)
+    const marker = ctx.renderMode === 'hermes' ? '•' : '⏳'
+    const msgId = await ctx.sender.sendMessage(chatId, `${marker} ${label}`)
     if (msgId) {
       ctx.turnProgress.set(threadId, {
-        chatId, messageId: msgId, steps: [`⏳ ${label}`], lastEditAt: Date.now(),
+        chatId, messageId: msgId, steps: [`${marker} ${label}`], lastEditAt: Date.now(),
       })
     }
   }
@@ -139,10 +197,12 @@ async function onItemCompleted(threadId: string, params: unknown, ctx: Notificat
   const item = asRecord(p?.item)
   if (!item) return
 
-  const label = formatItemLabel(item)
+  const label = formatItemLabel(item, ctx.renderMode)
   if (!label) return
 
-  const steps = foldProgressSteps(progress.steps.map(s => (s === `⏳ ${label}` ? `✅ ${label}` : s)))
+  const started = ctx.renderMode === 'hermes' ? `• ${label}` : `⏳ ${label}`
+  const completed = ctx.renderMode === 'hermes' ? `✓ ${label}` : `✅ ${label}`
+  const steps = foldProgressSteps(progress.steps.map(s => (s === started ? completed : s)))
   const now = Date.now()
   if (now - progress.lastEditAt > 800) {
     await ctx.sender.editMessageText(progress.chatId, progress.messageId, steps.join('\n'))
@@ -150,6 +210,7 @@ async function onItemCompleted(threadId: string, params: unknown, ctx: Notificat
   } else {
     ctx.turnProgress.set(threadId, { ...progress, steps })
   }
+  await maybeSendImage(threadId, params, ctx)
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +248,7 @@ async function onAgentMessageDelta(threadId: string, params: unknown, ctx: Notif
   const p = asRecord(params)
   const delta = typeof p?.delta === 'string' ? p.delta : ''
   if (!delta) return
+  if (ctx.renderMode === 'hermes') return
 
   const s = getOrCreateStreaming(threadId, ctx)
   if (!s) return
@@ -229,17 +291,31 @@ async function onTurnCompleted(threadId: string, params: unknown, ctx: Notificat
 
   if (!raw) return
 
-  const segments = renderTelegramHtmlSegments(raw)
+  const segments = ctx.renderMode === 'hermes'
+    ? renderTelegramHtmlSegments(raw)
+    : renderTelegramMarkdownSegments(raw)
 
   if (progress) {
-    await ctx.sender.editHtmlMessage(progress.chatId, progress.messageId, segments[0])
+    if (ctx.renderMode === 'hermes') {
+      await ctx.sender.editHtmlMessage(progress.chatId, progress.messageId, segments[0])
+    } else {
+      await ctx.sender.editRichMessage(progress.chatId, progress.messageId, segments[0])
+    }
     for (let i = 1; i < segments.length; i++) {
-      await ctx.sender.sendHtmlMessage(progress.chatId, segments[i])
+      if (ctx.renderMode === 'hermes') {
+        await ctx.sender.sendHtmlMessage(progress.chatId, segments[i])
+      } else {
+        await ctx.sender.sendRichMessage(progress.chatId, segments[i])
+      }
     }
   } else {
     for (const chatId of chatIds) {
       for (const seg of segments) {
-        await ctx.sender.sendHtmlMessage(chatId, seg)
+        if (ctx.renderMode === 'hermes') {
+          await ctx.sender.sendHtmlMessage(chatId, seg)
+        } else {
+          await ctx.sender.sendRichMessage(chatId, seg)
+        }
       }
     }
   }
