@@ -2,6 +2,10 @@
 
 统一的 Codex 服务层仓库。
 
+## 产品总览
+
+![Codex App Overview (EN)](docs/project/assets/overview.png)
+
 ## 入口
 
 | 需要了解 | 读这个 |
