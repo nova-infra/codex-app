@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { basename } from 'node:path'
-import type { CodexClient } from '@codex-app/core'
+import type { CodexClient, SessionControlService } from '@codex-app/core'
 import { REASONING_EFFORTS, MODEL_PICKER_LIMIT } from '@/types'
 import type { TelegramSender } from '@/sender'
 
@@ -22,15 +22,16 @@ function toWorkspaceKey(workspace: string): string {
   return createHash('sha1').update(workspace).digest('hex').slice(0, 16)
 }
 
-export async function listThreads(codex: CodexClient): Promise<ThreadSummary[]> {
-  const res = asRecord(await codex.call('thread/list', { archived: false, limit: 20, sortKey: 'updated_at' }))
-  const rows = Array.isArray(res?.data) ? res.data : []
-  return rows.flatMap((row: unknown) => {
-    const r = asRecord(row)
-    const id = typeof r?.id === 'string' ? r.id.trim() : ''
+export async function listThreads(
+  userId: string,
+  sessions: SessionControlService,
+): Promise<ThreadSummary[]> {
+  const rows = await sessions.listOwnedThreads(userId, 20)
+  return rows.flatMap((row) => {
+    const id = row.id.trim()
     if (!id) return []
-    const cwd = typeof r?.cwd === 'string' ? r.cwd.trim() : ''
-    const name = typeof r?.name === 'string' ? r.name : typeof r?.preview === 'string' ? r.preview : id
+    const cwd = row.cwd.trim()
+    const name = row.name
     const workspace = cwd || 'project'
     return [{
       id,
@@ -42,8 +43,13 @@ export async function listThreads(codex: CodexClient): Promise<ThreadSummary[]> 
   })
 }
 
-export async function sendThreadPicker(chatId: number, codex: CodexClient, sender: TelegramSender): Promise<void> {
-  const threads = await listThreads(codex)
+export async function sendThreadPicker(
+  chatId: number,
+  userId: string,
+  sessions: SessionControlService,
+  sender: TelegramSender,
+): Promise<void> {
+  const threads = await listThreads(userId, sessions)
   if (!threads.length) {
     await sender.sendMessage(chatId, '没有找到会话，发送 /new 创建。')
     return

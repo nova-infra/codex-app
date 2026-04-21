@@ -4,8 +4,7 @@
  */
 
 import { type AppConfig, addUser, revokeToken, listUsers, loadConfig } from '@codex-app/core'
-import type { CodexClient } from '@codex-app/core'
-import type { AccountManager } from '@codex-app/codex-account'
+import type { CodexClient, SessionControlService } from '@codex-app/core'
 import type { ReasoningEffort } from '@/types'
 import { REASONING_EFFORTS } from '@/types'
 import type { TelegramSender } from '@/sender'
@@ -13,13 +12,15 @@ import type { TelegramSender } from '@/sender'
 export type CommandContext = {
   readonly sender: TelegramSender
   readonly codex: CodexClient
-  readonly accountManager?: AccountManager | null
+  readonly sessions: SessionControlService
   readonly chatToThread: ReadonlyMap<number, string>
   readonly modelByChat: Map<number, string>
   readonly reasoningByChat: Map<number, ReasoningEffort | ''>
   readonly config: AppConfig
+  readonly getUserId: (chatId: number) => Promise<string>
   readonly getCwd: (threadId: string) => Promise<string>
   readonly newThread: (chatId: number) => Promise<string>
+  readonly compactThread: (chatId: number) => Promise<void>
   readonly onConfigUpdate: (cfg: AppConfig) => void
   readonly persistChatState: (chatId: number, patch: { model?: string; reasoning?: ReasoningEffort | '' }) => Promise<void>
 }
@@ -33,7 +34,6 @@ export async function sendHelp(chatId: number, sender: TelegramSender): Promise<
     '/reasoning - 选择推理深度',
     '/status - 查看状态',
     '/token - 管理 Token（管理员）',
-    '/cx - Codex 账号管理',
     '/help - 查看命令说明',
   ].join('\n'))
 }
@@ -46,12 +46,6 @@ export async function sendStatus(chatId: number, ctx: CommandContext): Promise<v
     lines.push(`会话：${threadId}`, `目录：${cwd || '（未设置）'}`)
   } else {
     lines.push('会话：（未绑定）')
-  }
-  if (ctx.accountManager) {
-    const activeAccount = ctx.accountManager.getActiveAccount()
-    lines.push(activeAccount
-      ? `Codex 账号：${activeAccount.email} (${activeAccount.planType})`
-      : 'Codex 账号：（未导入）')
   }
   const model = ctx.modelByChat.get(chatId)
   if (model) lines.push(`模型：${model}`)
@@ -147,7 +141,7 @@ export async function handleContextCallback(
   const threadId = ctx.chatToThread.get(chatId)
   if (!threadId) { await ctx.sender.answerCallbackQuery(cbId, '未绑定会话'); return }
   if (action === 'compact') {
-    await ctx.codex.call('thread/compact/start', { threadId })
+    await ctx.compactThread(chatId)
     await ctx.sender.answerCallbackQuery(cbId, '正在压缩...')
   } else if (action === 'new') {
     await ctx.newThread(chatId)

@@ -3,8 +3,13 @@
  * Handles: message routing, slash commands, approval menus, token binding, notification dispatch.
  */
 
-import type { CodexClient } from '@codex-app/core'
-import type { AppConfig } from '@codex-app/core'
+import type {
+  AppConfig,
+  CodexClient,
+  EventPipeline,
+  RuntimeEvent,
+  SessionControlService,
+} from '@codex-app/core'
 import type { ILinkIncomingMessage, ILinkMessageItem } from '@/iLinkClient'
 import { WechatSender } from '@/sender'
 import { collectInboundTextForCodex, hasWeChatRichMediaForCommands } from '@/textFormat'
@@ -12,8 +17,7 @@ import { buildCodexTurnInputFromWeChatItems } from '@/turnInput'
 import { findBinding, loadAllBindings, saveBinding, updateBinding } from '@codex-app/core'
 import type { PollerStatus } from '@/polling'
 import { extractWechatErrorMessage, formatWechatItemProgress } from '@/progressText'
-import { handleCxText, handleModelCommand, handleReasoningCommand, sendHelp, sendStatus, sendThreadPicker } from '@/commands'
-import type { AccountManager } from '@codex-app/codex-account'
+import { handleModelCommand, handleReasoningCommand, sendHelp, sendStatus, sendThreadPicker } from '@/commands'
 import { relayWechatGeneratedImages } from '@/imageDelivery'
 import { extractLatestAssistant } from '@/threadRead'
 
@@ -41,9 +45,10 @@ export class WechatAdapter {
   constructor(
     private readonly codex: CodexClient,
     private readonly sender: WechatSender,
+    private readonly sessions: SessionControlService,
+    private readonly events: EventPipeline,
     private readonly config: AppConfig,
     private readonly getPollerStatus: () => PollerStatus,
-    private readonly accountManager: AccountManager | null = null,
   ) {}
 
   private async resolveCwd(chatId: string): Promise<string> {
@@ -51,11 +56,17 @@ export class WechatAdapter {
     return b?.cwd ?? process.cwd()
   }
 
+  private async getBoundUserId(chatId: string): Promise<string> {
+    const binding = await findBinding('wechat', chatId)
+    if (!binding?.userId) throw new Error('chat is not bound to a user')
+    return binding.userId
+  }
+
   start(): void {
     void this.restoreChatState().catch(() => {})
     this.notificationUnsub?.()
-    this.notificationUnsub = this.codex.onNotification((n) => {
-      void this.handleNotification(n).catch(() => {})
+    this.notificationUnsub = this.events.onEvent((event) => {
+      void this.handleNotification(event).catch(() => {})
     })
   }
 
@@ -146,10 +157,10 @@ export class WechatAdapter {
     if (cmd === '/status') { await sendStatus(chatId, this.commandCtx()); return true }
     if (await handleModelCommand(chatId, cmd, this.commandCtx())) return true
     if (await handleReasoningCommand(chatId, cmd, this.commandCtx())) return true
-    if (await handleCxText(chatId, cmd, this.commandCtx())) return true
     const threadMatch = cmd.match(/^\/thread\s+(\S+)$/)
     if (threadMatch) {
       const threadId = threadMatch[1]
+      await this.sessions.switchChannelThread('wechat', chatId, await this.getBoundUserId(chatId), threadId)
       this.bindChatToThread(chatId, threadId)
       const cwd = await this.readThreadCwd(threadId)
       await this.sendRaw(chatId, `已连接会话：${threadId}${cwd ? `\n当前目录：${cwd}` : ''}`)
@@ -169,7 +180,7 @@ export class WechatAdapter {
     if (!pending) return false
     this.pendingApprovals.delete(chatId)
     const approved = choice === '1'
-    this.codex.reply(pending.id, { approved })
+    await this.sessions.replyApproval(pending.id, approved)
     await this.sendRaw(chatId, approved ? '已确认' : '已拒绝')
     return true
   }
@@ -183,32 +194,39 @@ export class WechatAdapter {
     await this.sendRaw(chatId, `绑定成功！欢迎 ${user?.name ?? entry.userId}，发消息开始使用 Codex。`)
   }
 
-  private async handleNotification(notification: { method: string; params: unknown }): Promise<void> {
-    const params = asRecord(notification.params)
-    if (notification.method.endsWith('Approval') && params) {
-      const id = typeof params.id === 'number' ? params.id : -1
+  private async handleNotification(event: RuntimeEvent): Promise<void> {
+    const params = asRecord(event.raw.params)
+    if (event.kind === 'approval_request' && params) {
+      const id = typeof params.id === 'number'
+        ? params.id
+        : typeof params._requestId === 'number'
+          ? params._requestId
+          : -1
       if (id < 0) return
-      const desc = typeof params.description === 'string' ? params.description : notification.method
-      for (const [chatId] of this.threadIdByChatId) {
-        this.pendingApprovals.set(chatId, { id, method: notification.method })
-        const label = notification.method.replace('Approval', '')
+      const desc = typeof params.description === 'string' ? params.description : event.method
+      const chatIds = event.threadId
+        ? (this.chatIdsByThreadId.get(event.threadId) ?? new Set<string>())
+        : new Set(this.threadIdByChatId.keys())
+      for (const chatId of chatIds) {
+        this.pendingApprovals.set(chatId, { id, method: event.method })
+        const label = event.method.replace('Approval', '')
         await this.sendRaw(chatId, `[${label}] ${desc}\n\n回复 1 确认，2 拒绝`)
       }
       return
     }
-    if (notification.method === 'item/started') {
-      const threadId = this.extractThreadId(notification)
+    if (event.method === 'item/started') {
+      const threadId = this.extractThreadId(event)
       if (!threadId) return
       const chatIds = this.chatIdsByThreadId.get(threadId)
-      const text = formatWechatItemProgress(notification.params)
+      const text = formatWechatItemProgress(event.raw.params)
       if (!chatIds || !text) return
       for (const chatId of chatIds) await this.sendProgress(chatId, text)
       return
     }
-    if (notification.method === 'item/completed') {
-      const threadId = this.extractThreadId(notification)
+    if (event.method === 'item/completed') {
+      const threadId = this.extractThreadId(event)
       if (!threadId) return
-      const item = asRecord(asRecord(notification.params)?.item)
+      const item = asRecord(asRecord(event.raw.params)?.item)
       const type = typeof item?.type === 'string' ? item.type : ''
       if (type !== 'imageGeneration' && type !== 'imageView') return
       const chatIds = this.chatIdsByThreadId.get(threadId)
@@ -219,12 +237,12 @@ export class WechatAdapter {
       }
       return
     }
-    if (notification.method === 'error') {
-      const threadId = this.extractThreadId(notification)
+    if (event.method === 'error') {
+      const threadId = this.extractThreadId(event)
       if (!threadId) return
       const chatIds = this.chatIdsByThreadId.get(threadId)
       if (!chatIds || chatIds.size === 0) return
-      const message = `处理失败：${extractWechatErrorMessage(notification.params)}`
+      const message = `处理失败：${extractWechatErrorMessage(event.raw.params)}`
       for (const chatId of chatIds) {
         this.progressByChatId.delete(chatId)
         this.sender.endTypingIndicator(chatId, this.contextTokenByChatId.get(chatId) ?? '')
@@ -232,12 +250,12 @@ export class WechatAdapter {
       }
       return
     }
-    if (notification.method !== 'turn/completed') return
-    const threadId = this.extractThreadId(notification)
+    if (event.method !== 'turn/completed') return
+    const threadId = this.extractThreadId(event)
     if (!threadId) return
     const chatIds = this.chatIdsByThreadId.get(threadId)
     if (!chatIds || chatIds.size === 0) return
-    const turnId = this.extractTurnId(notification)
+    const turnId = this.extractTurnId(event)
     if (turnId && this.lastForwardedTurn.get(threadId) === turnId) return
     const { text, signature } = await this.readLatestAssistant(threadId)
     const endTyping = (): void => {
@@ -264,17 +282,21 @@ export class WechatAdapter {
   }
 
   private async ensureThread(chatId: string): Promise<string> {
-    return this.threadIdByChatId.get(chatId) ?? this.createThread(chatId)
+    const current = this.threadIdByChatId.get(chatId)
+    if (current) return current
+    const threadId = await this.sessions.ensureChannelThread('wechat', chatId, await this.getBoundUserId(chatId), {
+      projectDir: await this.resolveCwd(chatId),
+      model: this.modelByChatId.get(chatId),
+    })
+    this.bindChatToThread(chatId, threadId)
+    return threadId
   }
 
   private async createThread(chatId: string): Promise<string> {
-    const params: Record<string, unknown> = { cwd: await this.resolveCwd(chatId) }
-    const model = this.modelByChatId.get(chatId)
-    if (model) params.model = model
-    const response = asRecord(await this.codex.call('thread/start', params))
-    const thread = asRecord(response?.thread)
-    const threadId = typeof thread?.id === 'string' ? thread.id : ''
-    if (!threadId) throw new Error('thread/start did not return thread id')
+    const threadId = await this.sessions.createChannelThread('wechat', chatId, await this.getBoundUserId(chatId), {
+      projectDir: await this.resolveCwd(chatId),
+      model: this.modelByChatId.get(chatId),
+    })
     this.bindChatToThread(chatId, threadId)
     return threadId
   }
@@ -295,9 +317,7 @@ export class WechatAdapter {
 
   private async readThreadCwd(threadId: string): Promise<string> {
     try {
-      const r = asRecord(await this.codex.call('thread/read', { threadId, includeTurns: false }))
-      const t = asRecord(r?.thread)
-      return typeof t?.cwd === 'string' ? t.cwd.trim() : ''
+      return await this.sessions.readThreadCwdUnsafe(threadId)
     } catch { return '' }
   }
 
@@ -323,9 +343,10 @@ export class WechatAdapter {
   private commandCtx() {
     return {
       codex: this.codex,
-      accountManager: this.accountManager,
+      sessions: this.sessions,
       getPollerStatus: this.getPollerStatus,
       sendRaw: (chatId: string, text: string) => this.sendRaw(chatId, text),
+      getUserId: (chatId: string) => this.getBoundUserId(chatId),
       getThreadId: (chatId: string) => this.threadIdByChatId.get(chatId),
       getModel: (chatId: string) => this.modelByChatId.get(chatId),
       getReasoning: (chatId: string) => this.reasoningByChatId.get(chatId),
@@ -351,15 +372,16 @@ export class WechatAdapter {
     }
   }
 
-  private extractThreadId(n: { params: unknown }): string {
-    const p = asRecord(n.params)
+  private extractThreadId(event: RuntimeEvent): string {
+    if (event.threadId) return event.threadId
+    const p = asRecord(event.raw.params)
     if (!p) return ''
     if (typeof p.threadId === 'string') return p.threadId
     return typeof asRecord(p.turn)?.threadId === 'string' ? (asRecord(p.turn)?.threadId as string) : ''
   }
 
-  private extractTurnId(n: { params: unknown }): string {
-    const p = asRecord(n.params)
+  private extractTurnId(event: RuntimeEvent): string {
+    const p = asRecord(event.raw.params)
     if (!p) return ''
     if (typeof p.turnId === 'string') return p.turnId
     return typeof asRecord(p.turn)?.id === 'string' ? (asRecord(p.turn)?.id as string) : ''

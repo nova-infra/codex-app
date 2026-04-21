@@ -1,15 +1,14 @@
 {
   "name": "codex-app",
   "private": true,
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": ["packages/*"],
   "scripts": {
     "dev": "bun run packages/server/src/index.ts",
-    "dev:rn": "bun run --cwd apps/rn-client start",
-    "dev:rn:ios": "bun run --cwd apps/rn-client ios",
-    "dev:rn:android": "bun run --cwd apps/rn-client android",
+    "cli": "bun run packages/cli/src/main.ts",
     "build": "bun build packages/server/src/index.ts --compile --outfile codex-app-server",
     "graphify": "bash scripts/graphify.sh",
     "changeset": "changeset",
+    "changeset:status": "changeset status --since=origin/main",
     "version-packages": "changeset version",
     "release:tag": "changeset tag"
   },

@@ -1,6 +1,10 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { appPaths, ensureDirs } from '@/paths'
+import type { ChannelKey } from '@/registry/channelRegistry'
+import type { CapabilityKey } from '@/registry/capabilityRegistry'
+import { listChannels } from '@/registry/channelRegistry'
+import { listCapabilities } from '@/registry/capabilityRegistry'
 
 export type UserEntry = {
   readonly id: string
@@ -22,6 +26,19 @@ export type WechatConfig = {
   readonly enabled: boolean
 }
 
+export type WebConfig = {
+  readonly enabled: boolean
+  readonly transport: 'ws'
+}
+
+export type ChannelConfigMap = {
+  readonly web: WebConfig
+  readonly telegram: TelegramConfig & { readonly enabled: boolean }
+  readonly wechat: WechatConfig
+}
+
+export type CapabilityConfigMap = Readonly<Record<CapabilityKey, { readonly enabled: boolean; readonly driver?: string }>>
+
 export type CodexConfig = {
   readonly port: number
   readonly model: string
@@ -29,11 +46,30 @@ export type CodexConfig = {
   readonly sandbox: string
 }
 
+export type RuntimeConfig = {
+  readonly gateway: {
+    readonly transport: 'ws'
+  }
+  readonly codex: {
+    readonly transport: 'app-server-ws'
+  }
+  readonly policy: {
+    readonly autoCompact: {
+      readonly enabled: boolean
+      readonly mode: 'manual' | 'suggest' | 'automatic'
+      readonly thresholdRatio: number
+    }
+  }
+}
+
 export type AppConfig = {
   readonly port: number
   readonly codex: CodexConfig
   readonly users: readonly UserEntry[]
   readonly tokens: readonly TokenEntry[]
+  readonly channels: ChannelConfigMap
+  readonly capabilities: CapabilityConfigMap
+  readonly runtime: RuntimeConfig
   readonly telegram?: TelegramConfig
   readonly wechat?: WechatConfig
   readonly defaultCwd?: string
@@ -46,6 +82,22 @@ export type AppConfig = {
   }
 }
 
+function defaultChannels(): ChannelConfigMap {
+  const defaults = Object.fromEntries(listChannels().map(channel => [channel.key, channel.defaultEnabled])) as Record<ChannelKey, boolean>
+  return {
+    web: { enabled: defaults.web, transport: 'ws' },
+    telegram: { enabled: defaults.telegram, botToken: '', renderMode: 'classic' },
+    wechat: { enabled: defaults.wechat },
+  }
+}
+
+function defaultCapabilities(): CapabilityConfigMap {
+  const entries = listCapabilities().map(capability => {
+    return [capability.key, { enabled: capability.defaultEnabled }]
+  })
+  return Object.fromEntries(entries) as CapabilityConfigMap
+}
+
 const DEFAULT_CONFIG: AppConfig = {
   port: 8765,
   codex: {
@@ -56,6 +108,19 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   users: [],
   tokens: [],
+  channels: defaultChannels(),
+  capabilities: defaultCapabilities(),
+  runtime: {
+    gateway: { transport: 'ws' },
+    codex: { transport: 'app-server-ws' },
+    policy: {
+      autoCompact: {
+        enabled: true,
+        mode: 'suggest',
+        thresholdRatio: 0.8,
+      },
+    },
+  },
   streaming: {
     enabled: true,
     editIntervalMs: 2000,
@@ -79,13 +144,46 @@ export async function loadConfig(): Promise<AppConfig> {
   }
 
   const raw = await readFile(appPaths.config, 'utf-8')
-  const parsed = JSON.parse(raw) as AppConfig
-  return { ...DEFAULT_CONFIG, ...parsed }
+  const parsed = JSON.parse(raw) as Partial<AppConfig>
+  const telegram = parsed.channels?.telegram
+    ?? (parsed.telegram ? { enabled: true, botToken: parsed.telegram.botToken, renderMode: parsed.telegram.renderMode ?? 'classic' } : undefined)
+  const wechat = parsed.channels?.wechat
+    ?? (parsed.wechat ? { enabled: parsed.wechat.enabled } : undefined)
+
+  return {
+    ...DEFAULT_CONFIG,
+    ...parsed,
+    channels: {
+      ...DEFAULT_CONFIG.channels,
+      ...(parsed.channels ?? {}),
+      ...(telegram ? { telegram } : {}),
+      ...(wechat ? { wechat } : {}),
+    },
+    capabilities: {
+      ...DEFAULT_CONFIG.capabilities,
+      ...(parsed.capabilities ?? {}),
+    },
+    runtime: {
+      ...DEFAULT_CONFIG.runtime,
+      ...(parsed.runtime ?? {}),
+      policy: {
+        ...DEFAULT_CONFIG.runtime.policy,
+        ...(parsed.runtime?.policy ?? {}),
+        autoCompact: {
+          ...DEFAULT_CONFIG.runtime.policy.autoCompact,
+          ...(parsed.runtime?.policy?.autoCompact ?? {}),
+        },
+      },
+    },
+    telegram,
+    wechat,
+  }
 }
 
 export async function saveConfig(config: AppConfig): Promise<void> {
   await ensureDirs(appPaths)
-  await writeFile(appPaths.config, JSON.stringify(config, null, 2))
+  const { telegram: _telegram, wechat: _wechat, ...persisted } = config
+  await writeFile(appPaths.config, JSON.stringify(persisted, null, 2))
 }
 
 function generateToken(): string {

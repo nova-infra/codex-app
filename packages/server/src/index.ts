@@ -2,11 +2,13 @@ import {
   bootstrapConfig,
   CodexClient,
   TokenGuard,
-  SessionManager,
   NotificationHub,
+  SessionControlService,
+  SessionPolicyEngine,
+  EventPipeline,
+  ContractRouter,
   type AppConfig,
 } from '@codex-app/core'
-import { AccountManager, callbackRegistry } from '@codex-app/codex-account'
 import { execFileSync } from 'node:child_process'
 import { start as startTelegramChannel } from '@codex-app/channel-telegram'
 import { start as startWechatChannel } from '@codex-app/channel-wechat'
@@ -26,7 +28,7 @@ if (created) {
   console.log(`[codex-app] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
   console.log(`[codex-app]   首次启动，已自动创建管理员`)
   console.log(`[codex-app]   用户: admin`)
-  console.log(`[codex-app]   Token: ${adminToken}`)
+  console.log(`[codex-app]   Token 已写入本地配置，请从 ~/.codex-app/config.json 查看`)
   console.log(`[codex-app] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
 } else {
   console.log(`[codex-app] Users: ${config.users.map(u => u.name).join(', ') || '(none)'}`)
@@ -34,22 +36,6 @@ if (created) {
 
 // Auth
 const tokenGuard = new TokenGuard(config.users, config.tokens)
-
-// Account management (writes ~/.codex/auth.json directly, no restart needed)
-const accountManager = new AccountManager(config.port)
-const importedExistingAccount = await accountManager.load()
-if (importedExistingAccount) {
-  console.log('[codex-app] Imported existing Codex login from ~/.codex/auth.json')
-}
-
-if (accountManager.hasAccounts()) {
-  await accountManager.applyActiveKey()
-}
-
-const active = accountManager.getActiveAccount()
-if (active) {
-  console.log(`[codex-app] Using account: ${active.email} (${active.id})`)
-}
 
 // Bridge
 const codex = new CodexClient(config.codex.port, {
@@ -62,12 +48,17 @@ await codex.start()
 console.log(`[codex-app] Codex app-server connected`)
 
 // Service layer
-const sessionManager = new SessionManager(codex)
-const notificationHub = new NotificationHub(codex)
+const sessionPolicy = new SessionPolicyEngine(config.runtime.policy.autoCompact)
+const sessionControl = new SessionControlService(codex)
+const eventPipeline = new EventPipeline(codex, sessionControl, sessionPolicy)
+eventPipeline.start()
+
+const notificationHub = new NotificationHub(eventPipeline)
 notificationHub.start()
+const contractRouter = new ContractRouter(codex, sessionControl)
 
 // WS proxy
-const wsProxy = new WsProxy(codex, sessionManager, notificationHub)
+const wsProxy = new WsProxy(contractRouter, notificationHub)
 
 // HTTP + WS server
 const server = Bun.serve<WsData>({
@@ -96,90 +87,10 @@ const server = Bun.serve<WsData>({
       }), { headers: { 'content-type': 'application/json' } })
     }
 
-    // ── Codex Account Management ─────────────────────────────────────────────
-
-    // List accounts (masked)
-    if (url.pathname === '/codex-account' && req.method === 'GET') {
-      return jsonResponse({ success: true, data: accountManager.list() })
-    }
-
-    // Auth method 1: Login (browser OAuth) → returns authUrl
-    if (url.pathname === '/codex-account/login' && req.method === 'POST') {
-      const { authUrl, state } = await accountManager.initiateLogin()
-      return jsonResponse({ success: true, data: { authUrl, state } })
-    }
-
-    // OAuth callback (browser redirect target)
-    if (url.pathname === '/codex-account/callback' && req.method === 'GET') {
-      const code = url.searchParams.get('code')
-      const state = url.searchParams.get('state')
-      if (!code || !state) {
-        return new Response('Missing code or state', { status: 400 })
-      }
-      try {
-        const account = await accountManager.handleCallback(code, state)
-        callbackRegistry.notifyLogin(state, account.email)
-        return new Response(`<html><body><h2>Account added: ${account.email}</h2><p>You can close this tab.</p></body></html>`, {
-          headers: { 'content-type': 'text/html' },
-        })
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        return new Response(`<html><body><h2>Auth failed</h2><p>${message}</p></body></html>`, {
-          status: 400,
-          headers: { 'content-type': 'text/html' },
-        })
-      }
-    }
-
-    // Auth method 2+3: Authorization code or Refresh token
-    if (url.pathname === '/codex-account/token' && req.method === 'POST') {
-      const body = await req.json() as { code?: string; codeVerifier?: string; refreshToken?: string }
-      try {
-        let account
-        if (body.refreshToken) {
-          account = await accountManager.addByRefreshToken(body.refreshToken)
-        } else if (body.code && body.codeVerifier) {
-          account = await accountManager.addByCode(body.code, body.codeVerifier)
-        } else {
-          return jsonResponse({ success: false, error: 'Provide { refreshToken } or { code, codeVerifier }' }, 400)
-        }
-        return jsonResponse({ success: true, data: account })
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        return jsonResponse({ success: false, error: message }, 400)
-      }
-    }
-
-    // Delete account
-    if (url.pathname.startsWith('/codex-account/') && req.method === 'DELETE') {
-      const id = url.pathname.slice('/codex-account/'.length)
-      if (id.includes('/')) return new Response('Not Found', { status: 404 })
-      const ok = await accountManager.remove(id)
-      if (!ok) return jsonResponse({ success: false, error: 'account not found' }, 404)
-      return jsonResponse({ success: true })
-    }
-
-    // Usage (5h / 1week)
-    if (url.pathname.startsWith('/codex-account/') && url.pathname.endsWith('/usage') && req.method === 'GET') {
-      const id = url.pathname.slice('/codex-account/'.length, -'/usage'.length)
-      try {
-        const usage = await accountManager.getUsage(id)
-        return jsonResponse({ success: true, data: usage })
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        return jsonResponse({ success: false, error: message }, 400)
-      }
-    }
-
-    // Switch active account
-    if (url.pathname.startsWith('/codex-account/') && url.pathname.endsWith('/activate') && req.method === 'POST') {
-      const id = url.pathname.slice('/codex-account/'.length, -'/activate'.length)
-      const ok = await accountManager.switchTo(id)
-      if (!ok) return jsonResponse({ success: false, error: 'account not found or disabled' }, 404)
-      return jsonResponse({ success: true, message: 'auth.json updated' })
-    }
-
     if (url.pathname === '/ws') {
+      if (!config.channels.web.enabled) {
+        return new Response('Web channel disabled', { status: 503 })
+      }
       const token = url.searchParams.get('token')
       const user = tokenGuard.verify(token)
       if (!user) {
@@ -217,20 +128,27 @@ await startChannels(config)
 type ChannelDeps = {
   readonly config: AppConfig
   readonly codex: CodexClient
-  readonly sessions: SessionManager
+  readonly sessionControl: SessionControlService
+  readonly events: EventPipeline
   readonly hub: NotificationHub
   readonly tokenGuard: TokenGuard
-  readonly accountManager: AccountManager
 }
 
 async function startChannels(cfg: AppConfig): Promise<void> {
-  const deps: ChannelDeps = { config: cfg, codex, sessions: sessionManager, hub: notificationHub, tokenGuard, accountManager }
+  const deps: ChannelDeps = {
+    config: cfg,
+    codex,
+    sessionControl,
+    events: eventPipeline,
+    hub: notificationHub,
+    tokenGuard,
+  }
 
-  if (cfg.telegram?.botToken) {
+  if (cfg.channels.telegram.enabled && cfg.channels.telegram.botToken) {
     await startChannel('@codex-app/channel-telegram', startTelegramChannel, deps)
   }
 
-  if (cfg.wechat?.enabled) {
+  if (cfg.channels.wechat.enabled) {
     await startChannel('@codex-app/channel-wechat', startWechatChannel, deps)
   }
 }

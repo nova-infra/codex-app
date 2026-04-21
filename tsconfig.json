@@ -12,8 +12,6 @@
     "paths": {
       "@codex-app/core": ["packages/core/src/index.ts"],
       "@codex-app/core/*": ["packages/core/src/*"],
-      "@codex-app/codex-account": ["packages/codex-account/src/index.ts"],
-      "@codex-app/codex-account/*": ["packages/codex-account/src/*"],
       "@codex-app/channel-telegram": ["packages/channel-telegram/src/index.ts"],
       "@codex-app/channel-wechat": ["packages/channel-wechat/src/index.ts"]
     },

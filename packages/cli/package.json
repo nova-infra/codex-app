@@ -1,10 +1,9 @@
 {
-  "name": "@codex-app/channel-telegram",
+  "name": "@codex-app/cli",
   "version": "0.1.0",
   "type": "module",
-  "exports": {
-    ".": "./src/index.ts",
-    "./*": "./src/*"
+  "bin": {
+    "codex-app": "./src/main.ts"
   },
   "dependencies": {
     "@codex-app/core": "workspace:*"

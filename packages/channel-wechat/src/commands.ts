@@ -1,15 +1,14 @@
-import type { CodexClient } from '@codex-app/core'
-import type { AccountManager } from '@codex-app/codex-account'
-import { callbackRegistry, handleRefresh, handleUsage, type ChannelCallbackContext } from '@codex-app/codex-account'
+import type { CodexClient, SessionControlService } from '@codex-app/core'
 import type { PollerStatus } from '@/polling'
 
 const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
 
 type WechatCommandContext = {
   readonly codex: CodexClient
-  readonly accountManager: AccountManager | null
+  readonly sessions: SessionControlService
   readonly getPollerStatus: () => PollerStatus
   readonly sendRaw: (chatId: string, text: string) => Promise<void>
+  readonly getUserId: (chatId: string) => Promise<string>
   readonly getThreadId: (chatId: string) => string | undefined
   readonly getModel: (chatId: string) => string | undefined
   readonly getReasoning: (chatId: string) => string | undefined
@@ -32,7 +31,6 @@ export async function sendHelp(chatId: string, ctx: WechatCommandContext): Promi
     '/project <path> - 设置项目目录',
     '/model [名称] - 查看或设置模型',
     '/reasoning [深度] - 查看或设置推理',
-    '/cx - Codex 账号管理',
     '/status - 查看状态',
     '/help - 查看指令说明',
   ]
@@ -57,8 +55,6 @@ export async function sendStatus(chatId: string, ctx: WechatCommandContext): Pro
   const reasoning = ctx.getReasoning(chatId)
   if (model) lines.push(`模型：${model}`)
   if (reasoning) lines.push(`推理：${reasoning}`)
-  const account = ctx.accountManager?.getActiveAccount()
-  if (account) lines.push(`Codex 账号：${account.email} (${account.planType})`)
   const poller = ctx.getPollerStatus()
   lines.push(
     `登录状态：${poller.loginState}`,
@@ -70,16 +66,13 @@ export async function sendStatus(chatId: string, ctx: WechatCommandContext): Pro
 }
 
 export async function sendThreadPicker(chatId: string, ctx: WechatCommandContext): Promise<void> {
-  const payload = asRecord(await ctx.codex.call('thread/list', { archived: false, limit: 20, sortKey: 'updated_at' }))
-  const rows = Array.isArray(payload?.data) ? payload.data : []
   const current = ctx.getThreadId(chatId)
   const parts: string[] = []
+  const rows = await ctx.sessions.listOwnedThreads(await ctx.getUserId(chatId), 20)
   for (const row of rows) {
-    const rec = asRecord(row)
-    const id = typeof rec?.id === 'string' ? rec.id.trim() : ''
-    if (!id) continue
-    const name = (typeof rec?.name === 'string' ? rec.name : '') || (typeof rec?.preview === 'string' ? rec.preview : '') || id
-    const cwd = typeof rec?.cwd === 'string' ? rec.cwd.trim() : ''
+    const id = row.id.trim()
+    const name = row.name || id
+    const cwd = row.cwd.trim()
     parts.push(`${id === current ? '✓ ' : ''}${cwd || '(未设置)'}/${name.slice(0, 40)}\n/thread ${id}`)
   }
   await ctx.sendRaw(chatId, parts.length ? `选择会话：\n\n${parts.join('\n\n')}` : '没有会话。发送 /new 创建。')
@@ -128,98 +121,5 @@ export async function handleReasoningCommand(chatId: string, cmd: string, ctx: W
   }
   await ctx.setReasoning(chatId, effort)
   await ctx.sendRaw(chatId, `推理深度已设为：${effort}`)
-  return true
-}
-
-export async function handleCxText(chatId: string, text: string, ctx: WechatCommandContext): Promise<boolean> {
-  const manager = ctx.accountManager
-  if (!manager || !text.trim().startsWith('/cx')) return false
-  const parts = text.trim().split(/\s+/)
-  const sub = (parts[1] ?? '').toLowerCase()
-
-  if (sub === '') {
-    const accounts = manager.list()
-    await ctx.sendRaw(
-      chatId,
-      accounts.length
-        ? `Codex 账号：\n${accounts.map((a) => `${a.email} (${a.planType})${a.isActive ? ' ✦当前' : ''}\n  id: ${a.id}`).join('\n')}`
-        : '尚无 Codex 账号。\n使用 /cx login 或 /cx token <refreshToken> 添加。',
-    )
-    return true
-  }
-  if (sub === 'login') {
-    const { authUrl, state } = await manager.initiateLogin()
-    const callbackCtx: ChannelCallbackContext = {
-      channelType: 'wechat',
-      chatId,
-      state,
-      createdAt: Date.now(),
-    }
-    callbackRegistry.register(callbackCtx)
-    await ctx.sendRaw(chatId, `打开链接登录（10 分钟内有效）：\n${authUrl}`)
-    return true
-  }
-  if (sub === 'token') {
-    const token = parts[2]?.trim()
-    if (!token) {
-      await ctx.sendRaw(chatId, '用法：/cx token <refreshToken>')
-      return true
-    }
-    try {
-      const account = await manager.addByRefreshToken(token)
-      await ctx.sendRaw(chatId, `账号已添加：${account.email} (${account.planType})`)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      await ctx.sendRaw(chatId, `添加失败：${message}`)
-    }
-    return true
-  }
-  if (sub === 'usage') {
-    const reply = await handleUsage(manager)
-    await ctx.sendRaw(chatId, reply.text)
-    return true
-  }
-  if (sub === 'refresh') {
-    const reply = await handleRefresh(text.trim(), manager)
-    await ctx.sendRaw(chatId, reply.text)
-    return true
-  }
-  if (sub === 'switch') {
-    const id = parts[2]?.trim()
-    if (!id) {
-      const available = manager.list().filter((a) => !a.disabled)
-      await ctx.sendRaw(chatId, available.length
-        ? `可切换账号：\n${available.map((a) => `${a.email}\n  /cx switch ${a.id}`).join('\n')}`
-        : '没有可切换的账号。')
-      return true
-    }
-    const ok = await manager.switchTo(id)
-    await ctx.sendRaw(chatId, ok ? `已切换到：${manager.getActiveAccount()?.email ?? id}` : '账号不存在或已禁用')
-    return true
-  }
-  if (sub === 'remove') {
-    const id = parts[2]?.trim()
-    if (!id) {
-      const accounts = manager.list()
-      await ctx.sendRaw(chatId, accounts.length
-        ? `可删除账号：\n${accounts.map((a) => `${a.email}\n  /cx remove ${a.id}`).join('\n')}`
-        : '没有可删除的账号。')
-      return true
-    }
-    const existing = manager.list().find((a) => a.id === id)
-    const ok = await manager.remove(id)
-    await ctx.sendRaw(chatId, ok ? `已删除：${existing?.email ?? id}` : '账号不存在')
-    return true
-  }
-  await ctx.sendRaw(chatId, [
-    'Codex 账号管理：',
-    '/cx',
-    '/cx login',
-    '/cx token <refreshToken>',
-    '/cx switch [id]',
-    '/cx usage',
-    '/cx refresh [id]',
-    '/cx remove [id]',
-  ].join('\n'))
   return true
 }

@@ -1,20 +1,20 @@
-import type { CodexClient, CodexNotification } from '@/bridge/codexClient'
+import type { EventPipeline, RuntimeEvent } from '@/events/eventPipeline'
 
 export type ChannelSink = {
   readonly type: 'ws' | 'telegram' | 'wechat'
   readonly id: string
-  send(notification: CodexNotification): void
+  send(event: RuntimeEvent): void
 }
 
 export class NotificationHub {
   private readonly sinks = new Map<string, Set<ChannelSink>>()
   private unsubscribe: (() => void) | null = null
 
-  constructor(private readonly codex: CodexClient) {}
+  constructor(private readonly events: EventPipeline) {}
 
   start(): void {
-    this.unsubscribe = this.codex.onNotification((n) => {
-      this.dispatch(n)
+    this.unsubscribe = this.events.onEvent((event) => {
+      this.dispatch(event)
     })
   }
 
@@ -37,26 +37,12 @@ export class NotificationHub {
     }
   }
 
-  private dispatch(notification: CodexNotification): void {
-    // Extract threadId from notification params if available
-    const params = notification.params as Record<string, unknown> | null
-    const threadId = typeof params?.threadId === 'string' ? params.threadId : null
-
-    if (threadId) {
-      const sinks = this.sinks.get(threadId)
-      if (sinks) {
-        for (const sink of sinks) {
-          sink.send(notification)
-        }
-      }
-      return
-    }
-
-    // Broadcast to all if no threadId
-    for (const sinks of this.sinks.values()) {
-      for (const sink of sinks) {
-        sink.send(notification)
-      }
+  private dispatch(event: RuntimeEvent): void {
+    if (!event.threadId) return
+    const sinks = this.sinks.get(event.threadId)
+    if (!sinks) return
+    for (const sink of sinks) {
+      sink.send(event)
     }
   }
 }

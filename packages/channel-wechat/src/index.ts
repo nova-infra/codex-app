@@ -3,9 +3,7 @@
  * WechatChannel: composites ILinkPoller + WechatSender + WechatAdapter.
  */
 
-import type { CodexClient, AppConfig } from '@codex-app/core'
-import type { AccountManager } from '@codex-app/codex-account'
-import { callbackRegistry } from '@codex-app/codex-account'
+import type { CodexClient, AppConfig, EventPipeline, SessionControlService } from '@codex-app/core'
 import { appPaths } from '@codex-app/core'
 import { ILinkPoller, type PollerStatus } from '@/polling'
 import { WechatSender } from '@/sender'
@@ -21,7 +19,13 @@ export class WechatChannel {
   private readonly adapter: WechatAdapter
   private started = false
 
-  constructor(codex: CodexClient, config: AppConfig, accountManager: AccountManager | null = null, dataDir = appPaths.root) {
+  constructor(
+    codex: CodexClient,
+    config: AppConfig,
+    sessions: SessionControlService,
+    events: EventPipeline,
+    dataDir = appPaths.root,
+  ) {
     // Poller owns the ILinkClient; sender shares it via poller.client
     this.poller = new ILinkPoller(dataDir, {
       onMessage: async (msg) => this.adapter.handleMessage(msg),
@@ -29,15 +33,7 @@ export class WechatChannel {
       onError: (err) => process.stderr.write(`[WeChat] Error: ${err}\n`),
     })
     this.sender = new WechatSender(this.poller.client, DEFAULT_CDN_BASE)
-    this.adapter = new WechatAdapter(codex, this.sender, config, () => this.poller.status, accountManager)
-
-    if (accountManager) {
-      const adapter = this.adapter
-      callbackRegistry.onLogin((ctx, email) => {
-        if (ctx.channelType !== 'wechat') return
-        void adapter.notifyChat(ctx.chatId, `授权成功，账号已添加：${email}`)
-      })
-    }
+    this.adapter = new WechatAdapter(codex, this.sender, sessions, events, config, () => this.poller.status)
   }
 
   async start(): Promise<void> {
@@ -65,9 +61,10 @@ export { ILinkPoller } from '@/polling'
 
 export async function start(deps: {
   readonly codex: CodexClient
+  readonly sessionControl: SessionControlService
+  readonly events: EventPipeline
   readonly config: AppConfig
-  readonly accountManager?: AccountManager
 }): Promise<void> {
-  const channel = new WechatChannel(deps.codex, deps.config, deps.accountManager ?? null)
+  const channel = new WechatChannel(deps.codex, deps.config, deps.sessionControl, deps.events)
   await channel.start()
 }

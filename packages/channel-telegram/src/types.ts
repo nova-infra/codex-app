@@ -50,13 +50,6 @@ export const BOT_COMMANDS: readonly TelegramCommand[] = [
   { command: 'reasoning', description: '选择推理深度' },
   { command: 'status', description: '查看状态' },
   { command: 'help', description: '查看命令说明' },
-  { command: 'cx', description: 'Codex 账号管理' },
-  { command: 'cx_login', description: 'Codex OAuth 登录' },
-  { command: 'cx_token', description: '添加 Codex refreshToken' },
-  { command: 'cx_switch', description: '切换 Codex 账号' },
-  { command: 'cx_usage', description: '查看 Codex 用量' },
-  { command: 'cx_refresh', description: '刷新 Codex token' },
-  { command: 'cx_remove', description: '删除 Codex 账号' },
 ]
 
 export const MODEL_PICKER_LIMIT = 20

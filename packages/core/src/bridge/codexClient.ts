@@ -68,9 +68,13 @@ export class CodexClient {
       })
 
       let started = false
+      let addressInUse = false
 
       this.codexProcess.stderr?.on('data', (chunk: Buffer) => {
         const text = chunk.toString()
+        if (text.includes('Address already in use')) {
+          addressInUse = true
+        }
         if (!started && (text.includes('listening') || text.includes('Listening'))) {
           started = true
           resolve()
@@ -79,6 +83,9 @@ export class CodexClient {
 
       this.codexProcess.stdout?.on('data', (chunk: Buffer) => {
         const text = chunk.toString()
+        if (text.includes('Address already in use')) {
+          addressInUse = true
+        }
         if (!started && (text.includes('listening') || text.includes('Listening'))) {
           started = true
           resolve()
@@ -88,6 +95,11 @@ export class CodexClient {
       this.codexProcess.on('error', reject)
       this.codexProcess.on('exit', (code) => {
         if (!started) {
+          if (addressInUse) {
+            started = true
+            resolve()
+            return
+          }
           reject(new Error(`codex app-server exited with code ${code}`))
         }
       })

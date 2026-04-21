@@ -1,23 +1,45 @@
 # Codex App Workspace
 
-统一的 Codex 服务层，为 RN App / Telegram / 微信提供 AI 编程能力。
+统一的 Codex 服务层，为 Web / Telegram / 微信提供 AI 编程能力。
+
+## 仓库定位
+
+- `README.md` 只作为索引入口，不承载详细说明
+- 当前实现仍然是 `v1`
+- 后续规划、模块边界和推进顺序统一以 `docs/architecture/` 为准
+- 回答架构或代码结构问题时，优先结合 `graphify-out/GRAPH_REPORT.md` 与 `docs/architecture/`
 
 ## 文档路由
 
 | 需要了解 | 读这个 |
 |---------|--------|
-| 完整设计文档 | `docs/specs/2026-04-08-codex-app-design.md` |
+| 图谱总览 | `graphify-out/GRAPH_REPORT.md` |
+| 目标架构 | `docs/architecture/README.md` |
+| CLI 架构 | `docs/architecture/cli.md` |
+| 重构路线图 | `docs/architecture/roadmap.md` |
 | 版本/发布工作流 | `docs/workflows/versioning-and-release.md` |
+
+## 文档语言
+
+- 默认使用中文编写文档、说明和规划内容
+- 只有在需要对外发布、对接英文资料或用户明确要求时，才补充英文版本
 
 ## 架构概览
 
 ```
-RN App ──ws──▸ codex-app server ──ws──▸ codex app-server (单实例)
+Web ──ws──▸ codex-app server ──ws──▸ codex app-server (单实例)
 TG Bot ──long polling──▸ server
 微信 ──iLink long polling──▸ server
 ```
 
 无需公网 IP，无需穿透。
+
+## 当前主线
+
+- 稳定内核
+- capability registry
+- channel plugin
+- preset 驱动装配
 
 ## 包职责
 

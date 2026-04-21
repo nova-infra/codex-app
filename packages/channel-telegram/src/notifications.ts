@@ -3,7 +3,7 @@
  * Handles: tool progress, streaming text deltas, turn completion, token usage.
  */
 
-import type { CodexClient } from '@codex-app/core'
+import type { CodexClient, RuntimeEvent } from '@codex-app/core'
 import type { TelegramSender } from '@/sender'
 import { createStreamingState, finalizeStreamingState, type StreamingState, type TelegramStreamingConfig } from '@/streaming'
 import { renderTelegramHtmlSegments, renderTelegramMarkdownSegments } from '@/format'
@@ -32,20 +32,6 @@ function asRecord(v: unknown): Record<string, unknown> | null {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
     ? (v as Record<string, unknown>)
     : null
-}
-
-function extractThreadId(n: { readonly params: unknown }): string {
-  const p = asRecord(n.params)
-  if (!p) return ''
-  if (typeof p.threadId === 'string') return p.threadId
-  if (typeof p.thread_id === 'string') return p.thread_id
-  if (typeof p.conversationId === 'string') return p.conversationId
-  if (typeof p.conversation_id === 'string') return p.conversation_id
-  const thread = asRecord(p.thread)
-  if (typeof thread?.id === 'string') return thread.id
-  const turn = asRecord(p.turn)
-  if (typeof turn?.threadId === 'string') return turn.threadId
-  return typeof turn?.thread_id === 'string' ? turn.thread_id : ''
 }
 
 const TOOL_ICONS_CLASSIC: Record<string, string> = {
@@ -374,33 +360,57 @@ async function onError(threadId: string, params: unknown, ctx: NotificationConte
   }
 }
 
+async function onApprovalRequest(event: RuntimeEvent, ctx: NotificationContext): Promise<void> {
+  if (!event.threadId || event.requestId === undefined) return
+  const chatIds = ctx.threadToChats.get(event.threadId)
+  if (!chatIds?.size) return
+  const params = asRecord(event.raw.params)
+  const description = typeof params?.description === 'string'
+    ? params.description.trim()
+    : '需要确认操作'
+  const label = event.method.replace('Approval', '')
+  const keyboard = {
+    inline_keyboard: [[
+      { text: '确认', callback_data: `approval:${event.requestId}:approve` },
+      { text: '拒绝', callback_data: `approval:${event.requestId}:reject` },
+    ]],
+  }
+  for (const chatId of chatIds) {
+    await ctx.sender.sendMessage(chatId, `[${label}] ${description}`, keyboard)
+  }
+}
+
 export async function handleNotification(
-  n: { readonly method: string; readonly params: unknown },
+  event: RuntimeEvent,
   ctx: NotificationContext,
 ): Promise<void> {
-  const threadId = extractThreadId(n)
-  switch (n.method) {
+  const threadId = event.threadId ?? ''
+  if (event.kind === 'approval_request') {
+      await onApprovalRequest(event, ctx)
+      return
+  }
+  switch (event.method) {
     case 'item/agentMessage/delta':
-      await onAgentMessageDelta(threadId, n.params, ctx)
+      await onAgentMessageDelta(threadId, event.raw.params, ctx)
       break
     case 'item/reasoning/summaryTextDelta':
       // Ignore reasoning summary deltas. The corresponding item/started event
       // already creates the single progress card we want to show in Telegram.
       break
     case 'item/started':
-      await onItemStarted(threadId, n.params, ctx)
+      await onItemStarted(threadId, event.raw.params, ctx)
       break
     case 'item/completed':
-      await onItemCompleted(threadId, n.params, ctx)
+      await onItemCompleted(threadId, event.raw.params, ctx)
       break
     case 'turn/completed':
-      await onTurnCompleted(threadId, n.params, ctx)
+      await onTurnCompleted(threadId, event.raw.params, ctx)
       break
     case 'error':
-      await onError(threadId, n.params, ctx)
+      await onError(threadId, event.raw.params, ctx)
       break
     case 'thread/tokenUsage/updated':
-      await onTokenUsage(threadId, n.params, ctx)
+      await onTokenUsage(threadId, event.raw.params, ctx)
       break
   }
 }

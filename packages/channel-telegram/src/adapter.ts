@@ -1,11 +1,21 @@
-import { type CodexClient, type AppConfig, saveBinding, findBinding, loadAllBindings, updateBinding } from '@codex-app/core'
+import {
+  type CodexClient,
+  type AppConfig,
+  type EventPipeline,
+  type SessionControlService,
+  saveBinding,
+  findBinding,
+  loadAllBindings,
+  updateBinding,
+} from '@codex-app/core'
 import type { TokenGuard } from '@codex-app/core'
 import type { TelegramUpdate, ReasoningEffort } from '@/types'
 import { BOT_COMMANDS } from '@/types'
 import { TelegramSender } from '@/sender'
 import { buildTelegramTurnText } from '@/channelText'
 import {
-  listThreads, sendThreadPicker, sendModelPicker,
+  listThreads,
+  sendThreadPicker, sendModelPicker,
   sendReasoningPicker, extractLatestAssistantText,
 } from '@/pickers'
 import { handleNotification, type NotificationContext, type TurnProgress, type StreamingState } from '@/notifications'
@@ -14,15 +24,6 @@ import {
   handleModelCallback, handleReasoningCallback, handleContextCallback,
   type CommandContext,
 } from '@/commands'
-import { sendCxReply } from '@/account-commands'
-import type { AccountManager } from '@codex-app/codex-account'
-import { handleCxCommand, handleCxCallback } from '@codex-app/codex-account'
-
-function asRecord(v: unknown): Record<string, unknown> | null {
-  return v !== null && typeof v === 'object' && !Array.isArray(v)
-    ? (v as Record<string, unknown>)
-    : null
-}
 
 export class TelegramAdapter {
   private readonly chatToThread = new Map<number, string>()
@@ -43,8 +44,9 @@ export class TelegramAdapter {
     private readonly codex: CodexClient,
     private readonly sender: TelegramSender,
     private readonly tokenGuard: TokenGuard,
+    private readonly sessions: SessionControlService,
+    private readonly events: EventPipeline,
     config: AppConfig,
-    private readonly accountManager: AccountManager | null = null,
   ) {
     this.config = config
   }
@@ -57,13 +59,15 @@ export class TelegramAdapter {
     return {
       sender: this.sender,
       codex: this.codex,
-      accountManager: this.accountManager,
+      sessions: this.sessions,
       chatToThread: this.chatToThread,
       modelByChat: this.modelByChat,
       reasoningByChat: this.reasoningByChat,
       config: this.config,
+      getUserId: chatId => this.getBoundUserId(chatId),
       getCwd: threadId => this.readCwd(threadId),
       newThread: chatId => this.newThread(chatId),
+      compactThread: chatId => this.compactThread(chatId),
       onConfigUpdate: cfg => { this.config = cfg },
       persistChatState: (chatId, patch) => updateBinding('telegram', String(chatId), patch),
     }
@@ -91,8 +95,8 @@ export class TelegramAdapter {
   start(): void {
     void this.restoreThreadMappings().catch(() => {})
     this.unsubscribe?.()
-    this.unsubscribe = this.codex.onNotification(n => {
-      void handleNotification(n, this.notifCtx()).catch(err => {
+    this.unsubscribe = this.events.onEvent(event => {
+      void handleNotification(event, this.notifCtx()).catch(err => {
         console.error(`[telegram] notification error:`, err)
       })
     })
@@ -142,15 +146,14 @@ export class TelegramAdapter {
     }
     if (text === '/start' || text === '/help') { await sendHelp(chatId, this.sender); return }
     if (text === '/new' || text === '/newthread') { await this.newThread(chatId); return }
-    if (text === '/session') { await sendThreadPicker(chatId, this.codex, this.sender); return }
+    if (text === '/session') {
+      await sendThreadPicker(chatId, await this.getBoundUserId(chatId), this.sessions, this.sender)
+      return
+    }
     if (text === '/status') { await sendStatus(chatId, this.cmdCtx()); return }
     if (text === '/model') { await sendModelPicker(chatId, this.codex, this.sender); return }
     if (text === '/reasoning') { await sendReasoningPicker(chatId, this.sender); return }
     if (text.startsWith('/token')) { await handleTokenCommand(chatId, text, bound.userId, this.cmdCtx()); return }
-    if (text === '/cx' || text.startsWith('/cx ') || text.startsWith('/cx_')) {
-      await this.handleCxText(chatId, text)
-      return
-    }
     const projectMatch = text.match(/^\/project\s+(\S+)$/)
     if (projectMatch) {
       const path = projectMatch[1]!
@@ -179,18 +182,6 @@ export class TelegramAdapter {
     await this.sender.sendMessage(chatId, '绑定成功！发送 /help 查看可用命令。')
   }
 
-  private async handleCxText(chatId: number, text: string): Promise<void> {
-    if (!this.accountManager) {
-      await this.sender.sendMessage(chatId, 'Codex 账号管理未启用。')
-      return
-    }
-    // Normalise /cx_login → /cx login etc.
-    const normalised = text.replace(/^\/cx_/, '/cx ')
-    const reply = await handleCxCommand(normalised, this.accountManager)
-    if (!reply) return
-    await sendCxReply(this.sender, chatId, reply)
-  }
-
   private async handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>): Promise<void> {
     const cbId = typeof cb.id === 'string' ? cb.id : ''
     const data = typeof cb.data === 'string' ? cb.data : ''
@@ -200,7 +191,7 @@ export class TelegramAdapter {
     if (data.startsWith('session:')) {
       const threadId = data.slice('session:'.length).trim()
       if (!threadId) { await this.sender.answerCallbackQuery(cbId, '无效'); return }
-      this.bindThread(chatId, threadId)
+      await this.switchThread(chatId, threadId)
       await this.sender.answerCallbackQuery(cbId, '已连接会话')
       const cwd = await this.readCwd(threadId)
       await this.sender.sendMessage(chatId, `已连接：${threadId}${cwd ? `\n目录：${cwd}` : ''}`)
@@ -208,8 +199,8 @@ export class TelegramAdapter {
     }
     if (data.startsWith('ws:')) {
       const workspaceKey = data.slice('ws:'.length).trim()
-      const threads = await listThreads(this.codex)
-      const sub = threads.filter(t => t.workspaceKey === workspaceKey)
+      const sub = (await listThreads(await this.getBoundUserId(chatId), this.sessions))
+        .filter(t => t.workspaceKey === workspaceKey)
       if (!sub.length) { await this.sender.answerCallbackQuery(cbId, '无会话'); return }
       const rows = [
         [{ text: '← 返回', callback_data: 'back:session' }],
@@ -221,7 +212,14 @@ export class TelegramAdapter {
     }
     if (data === 'back:session') {
       await this.sender.answerCallbackQuery(cbId)
-      await sendThreadPicker(chatId, this.codex, this.sender)
+      await sendThreadPicker(chatId, await this.getBoundUserId(chatId), this.sessions, this.sender)
+      return
+    }
+    if (data.startsWith('approval:')) {
+      const matched = data.match(/^approval:(\d+):(approve|reject)$/)
+      if (!matched) { await this.sender.answerCallbackQuery(cbId, '无效'); return }
+      await this.sessions.replyApproval(Number(matched[1]), matched[2] === 'approve')
+      await this.sender.answerCallbackQuery(cbId, matched[2] === 'approve' ? '已确认' : '已拒绝')
       return
     }
     if (data.startsWith('model:')) {
@@ -236,14 +234,6 @@ export class TelegramAdapter {
       await handleContextCallback(chatId, cbId, data.slice('ctx:'.length), this.cmdCtx())
       return
     }
-    if (data.startsWith('cx:') && this.accountManager) {
-      const reply = await handleCxCallback(data, this.accountManager)
-      if (reply) {
-        await this.sender.answerCallbackQuery(cbId)
-        await sendCxReply(this.sender, chatId, reply)
-        return
-      }
-    }
     await this.sender.answerCallbackQuery(cbId, '未知操作')
   }
 
@@ -254,6 +244,12 @@ export class TelegramAdapter {
   private async resolveCwd(chatId: number): Promise<string> {
     const b = await findBinding('telegram', String(chatId)) as { cwd?: string } | null
     return b?.cwd ?? process.cwd()
+  }
+
+  private async getBoundUserId(chatId: number): Promise<string> {
+    const binding = await findBinding('telegram', String(chatId))
+    if (!binding?.userId) throw new Error('chat is not bound to a user')
+    return binding.userId
   }
 
   private bindThread(chatId: number, threadId: string): void {
@@ -271,14 +267,11 @@ export class TelegramAdapter {
   }
 
   private async newThread(chatId: number): Promise<string> {
-    const params: Record<string, unknown> = { cwd: await this.resolveCwd(chatId) }
-    const model = this.modelByChat.get(chatId)
-    if (model) params.model = model
-    const res = asRecord(await this.codex.call('thread/start', params))
-    const thread = asRecord(res?.thread)
-    const threadId = typeof res?.threadId === 'string' ? res.threadId
-      : typeof thread?.id === 'string' ? thread.id : ''
-    if (!threadId) throw new Error('thread/start did not return a thread id')
+    const userId = await this.getBoundUserId(chatId)
+    const threadId = await this.sessions.createChannelThread('telegram', String(chatId), userId, {
+      projectDir: await this.resolveCwd(chatId),
+      model: this.modelByChat.get(chatId),
+    })
     this.bindThread(chatId, threadId)
     await this.sender.sendMessage(chatId, `已新建会话：${threadId}`)
     return threadId
@@ -286,11 +279,19 @@ export class TelegramAdapter {
 
   private async ensureThread(chatId: number): Promise<string> {
     const existing = this.chatToThread.get(chatId)
-    if (!existing) return this.newThread(chatId)
+    if (!existing) {
+      const userId = await this.getBoundUserId(chatId)
+      const threadId = await this.sessions.ensureChannelThread('telegram', String(chatId), userId, {
+        projectDir: await this.resolveCwd(chatId),
+        model: this.modelByChat.get(chatId),
+      })
+      this.bindThread(chatId, threadId)
+      return threadId
+    }
 
     if (!this.resumedThreads.has(existing)) {
       try {
-        await this.codex.call('thread/resume', { threadId: existing, cwd: await this.resolveCwd(chatId) })
+        await this.sessions.resumeThread(await this.getBoundUserId(chatId), existing, await this.resolveCwd(chatId))
         this.resumedThreads.add(existing)
       } catch {
         console.log(`[telegram] Thread ${existing.slice(0, 8)} not found, creating new`)
@@ -298,6 +299,22 @@ export class TelegramAdapter {
       }
     }
     return existing
+  }
+
+  private async switchThread(chatId: number, threadId: string): Promise<void> {
+    await this.sessions.switchChannelThread(
+      'telegram',
+      String(chatId),
+      await this.getBoundUserId(chatId),
+      threadId,
+    )
+    this.bindThread(chatId, threadId)
+  }
+
+  private async compactThread(chatId: number): Promise<void> {
+    const threadId = this.chatToThread.get(chatId)
+    if (!threadId) throw new Error('未绑定会话')
+    await this.sessions.compactThread(await this.getBoundUserId(chatId), threadId)
   }
 
   private async restoreThreadMappings(): Promise<void> {
@@ -356,10 +373,10 @@ export class TelegramAdapter {
 
   private async readCwd(threadId: string): Promise<string> {
     try {
-      const res = asRecord(await this.codex.call('thread/read', { threadId, includeTurns: false }))
-      const thread = asRecord(res?.thread)
-      return typeof thread?.cwd === 'string' ? thread.cwd : ''
-    } catch { return '' }
+      return await this.sessions.readThreadCwdUnsafe(threadId)
+    } catch {
+      return ''
+    }
   }
 
   // ---------------------------------------------------------------------------

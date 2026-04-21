@@ -17,6 +17,7 @@ The public packages in this workspace are versioned through their `package.json`
 - `@codex-app/core`
 - `@codex-app/channel-telegram`
 - `@codex-app/channel-wechat`
+- `@codex-app/cli`
 
 ## Contributor workflow
 
@@ -47,9 +48,16 @@ That workflow:
 3. creates or updates a **release/version PR**
 4. updates package versions and changelog entries in that PR
 
+On every pull request to `main`, GitHub Actions also runs:
+
+- `.github/workflows/changeset-status.yml`
+
+That workflow verifies the branch contains a valid pending changeset when release-worthy workspace changes are present.
+
 Repository secret requirement:
 
-- `RELEASE_PR_TOKEN` — a token with repository **Contents: Read and write** and **Pull requests: Read and write**
+- no custom release token is required
+- the workflow uses the default `GITHUB_TOKEN` provided by GitHub Actions
 
 ## Concurrent change workflow
 
@@ -130,6 +138,7 @@ Fields:
 ## Recommended rules
 
 - Keep repo docs and CI generic; do not commit machine-specific deployment paths or secrets
+- CLI and workflow output should redact token-like fields by default
 - Use changesets for user-visible changes, fixes, and release-worthy internal changes
 - Prefer `gitDirty: false` in production deployments
 - Verify `/health` or `/version` after every deployment

@@ -85,4 +85,13 @@ export class SessionStore {
     })
     await writeSessions(updated)
   }
+
+  async findById(sessionId: string): Promise<SessionMeta | null> {
+    const sessions = await readSessions()
+    return sessions.find(session => session.sessionId === sessionId) ?? null
+  }
+
+  async listAll(): Promise<readonly SessionMeta[]> {
+    return readSessions()
+  }
 }

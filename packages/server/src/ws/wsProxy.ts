@@ -1,9 +1,8 @@
 import type {
-  CodexClient,
-  CodexNotification,
+  ContractRouter,
   NotificationHub,
-  SessionManager,
   ChannelSink,
+  RuntimeEvent,
 } from '@codex-app/core'
 
 export type WsData = {
@@ -20,37 +19,18 @@ type JsonRpcRequest = {
   readonly params?: Record<string, unknown>
 }
 
-// Methods that require the caller to own the referenced session
-const OWNED_METHODS = new Set([
-  'thread/resume',
-  'thread/read',
-  'thread/archive',
-  'thread/compact/start',
-  'turn/start',
-  'turn/interrupt',
-  'turn/steer',
-])
-
 export class WsProxy {
   // Per-connection map: sessionId → ChannelSink, keyed by ws object
   private readonly connSinks = new WeakMap<WsConn, Map<string, ChannelSink>>()
 
   constructor(
-    private readonly codex: CodexClient,
-    private readonly sessions: SessionManager,
+    private readonly router: ContractRouter,
     private readonly hub: NotificationHub,
   ) {}
 
   open(ws: WsConn): void {
     const { userId, userName } = ws.data
     console.log(`[ws] Connected: ${userName} (${userId})`)
-
-    // Subscribe to notifications for all pre-existing sessions of this user
-    void this.sessions.listSessions(userId).then(sessions => {
-      for (const s of sessions) {
-        this.subscribe(ws, s.sessionId)
-      }
-    })
   }
 
   async message(ws: WsConn, raw: string | Buffer): Promise<void> {
@@ -66,10 +46,8 @@ export class WsProxy {
 
     console.log(`[ws] ${userId} → ${msg.method}`)
 
-    if (!await this.checkOwnership(ws, msg)) return
-
     try {
-      const result = await this.codex.call(msg.method, msg.params ?? {})
+      const result = await this.router.route(userId, msg)
       await this.postCall(ws, userId, msg, result)
       ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }))
     } catch (err: unknown) {
@@ -88,32 +66,11 @@ export class WsProxy {
     this.unsubscribeAll(ws)
   }
 
-  // Returns false and sends error if ownership check fails
-  private async checkOwnership(ws: WsConn, msg: JsonRpcRequest): Promise<boolean> {
-    if (!OWNED_METHODS.has(msg.method)) return true
-
-    const threadId = msg.params?.threadId as string | undefined
-    if (!threadId) return true
-
-    const { userId } = ws.data
-    const sessions = await this.sessions.listSessions(userId)
-    if (sessions.some(s => s.sessionId === threadId)) return true
-
-    ws.send(JSON.stringify({
-      jsonrpc: '2.0',
-      id: msg.id,
-      error: { code: -32403, message: 'Forbidden: session not owned by this user' },
-    }))
-    return false
-  }
-
   // Register new sessions and update notification subscriptions after a successful call
-  private async postCall(ws: WsConn, userId: string, msg: JsonRpcRequest, result: unknown): Promise<void> {
+  private async postCall(ws: WsConn, _userId: string, msg: JsonRpcRequest, result: unknown): Promise<void> {
     if (msg.method === 'thread/start') {
       const res = result as { threadId?: string } | null
       if (res?.threadId) {
-        const projectDir = (msg.params?.cwd as string) ?? ''
-        await this.sessions.registerSession(userId, res.threadId, projectDir)
         this.subscribe(ws, res.threadId)
       }
       return
@@ -132,9 +89,13 @@ export class WsProxy {
     const sink: ChannelSink = {
       type: 'ws',
       id: sessionId,
-      send: (n: CodexNotification) => {
+      send: (event: RuntimeEvent) => {
         if (ws.readyState === 1) {  // WebSocket.OPEN
-          ws.send(JSON.stringify(n))
+          ws.send(JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'runtime/event',
+            params: event,
+          }))
         }
       },
     }
