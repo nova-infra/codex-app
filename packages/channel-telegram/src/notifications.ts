@@ -103,16 +103,12 @@ function compactThinkingText(text: string): string {
 }
 
 function renderThinkingLine(text: string): string {
-  return text ? `🧠 ${text}` : '🧠 Thinking'
-}
-
-export async function showThinking(threadId: string, ctx: NotificationContext): Promise<void> {
-  await upsertThinkingLine(threadId, '', ctx)
+  return text ? `🧠 ${text}` : ''
 }
 
 async function upsertThinkingLine(threadId: string, delta: string, ctx: NotificationContext): Promise<void> {
   const text = compactThinkingText(delta)
-  if (!threadId) return
+  if (!threadId || !text) return
   const existing = ctx.thinking.get(threadId)
   if (existing) {
     if (!text) return
@@ -241,10 +237,7 @@ async function completeProgressCard(threadId: string, label: string, ctx: Notifi
 async function onItemStarted(threadId: string, params: unknown, ctx: NotificationContext): Promise<void> {
   const item = asRecord(asRecord(params)?.item)
   const type = typeof item?.type === 'string' ? item.type : ''
-  if (type === 'reasoning') {
-    await upsertThinkingLine(threadId, '', ctx)
-    return
-  }
+  if (type === 'reasoning') return
   const label = item ? formatItemLabel(item, ctx.renderMode) : null
   if (label) await updateProgressCard(threadId, label, ctx)
 }
