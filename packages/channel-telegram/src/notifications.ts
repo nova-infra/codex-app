@@ -26,28 +26,21 @@ export type NotificationContext = {
   readonly renderMode: 'classic' | 'hermes'
 }
 
-const TOOL_ICONS_CLASSIC: Record<string, string> = {
-  commandExecution: '🔧',
-  fileChange: '📝',
-  mcpToolCall: '🔌',
-  webSearch: '🔍',
+const ITEM_ICONS: Record<string, string> = {
   reasoning: '🧠',
-  imageView: '🖼',
-  imageGeneration: '🎨',
-  dynamicToolCall: '⚡',
-  plan: '📋',
-}
-
-const TOOL_ICONS_HERMES: Record<string, string> = {
   commandExecution: '⚙️',
   fileChange: '✏️',
   mcpToolCall: '🧰',
   webSearch: '🔎',
-  reasoning: '🧠',
-  imageView: '🖼️',
-  imageGeneration: '🖼️',
   dynamicToolCall: '🛠️',
   plan: '📌',
+  imageView: '🖼️',
+  imageGeneration: '🎨',
+  memory: '🧠',
+  memoryRead: '🧠',
+  memoryWrite: '💾',
+  hook: '🪝',
+  hookCall: '🪝',
 }
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -56,42 +49,99 @@ function asRecord(v: unknown): Record<string, unknown> | null {
     : null
 }
 
-function foldProgressSteps(steps: readonly string[]): string[] {
-  if (steps.length <= 4) return [...steps]
-  return [`… 前 ${steps.length - 3} 步已折叠`, ...steps.slice(-3)]
+function compactWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
 }
 
-function formatItemLabel(item: Record<string, unknown>, mode: 'classic' | 'hermes'): string | null {
-  const type = typeof item.type === 'string' ? item.type : ''
-  const icons = mode === 'hermes' ? TOOL_ICONS_HERMES : TOOL_ICONS_CLASSIC
-  const icon = icons[type] ?? ''
+function ellipsize(text: string, maxLen = 96): string {
+  const s = compactWhitespace(text)
+  if (s.length <= maxLen) return s
+  return `${s.slice(0, Math.max(1, maxLen - 1)).trimEnd()}…`
+}
+
+function basename(path: string): string {
+  const clean = path.trim().replace(/\\/g, '/')
+  return clean.split('/').filter(Boolean).pop() ?? clean
+}
+
+function pickString(rec: Record<string, unknown>, keys: readonly string[]): string {
+  for (const key of keys) {
+    const value = rec[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function summarizeFileChange(item: Record<string, unknown>): string {
+  const changes = Array.isArray(item.changes) ? item.changes : []
+  const first = asRecord(changes[0])
+  const file = first ? pickString(first, ['filePath', 'path', 'file', 'name']) : ''
+  const label = file ? `编辑 ${basename(file)}` : '编辑文件'
+  return changes.length > 1 ? `${label} +${changes.length - 1}` : label
+}
+
+function summarizeToolCall(item: Record<string, unknown>): string {
+  const tool = pickString(item, ['tool', 'toolName', 'name', 'method'])
+  const server = pickString(item, ['server', 'serverName', 'namespace'])
+  if (tool && server) return `${server}.${tool}`
+  return tool || server || '调用工具'
+}
+
+function inferItemType(item: Record<string, unknown>): string {
+  const explicit = pickString(item, ['type', 'kind'])
+  const name = pickString(item, ['name', 'tool', 'toolName', 'method']).toLowerCase()
+  if (/memory|remember|recall/.test(name)) return explicit || 'memory'
+  if (/hook/.test(name)) return explicit || 'hook'
+  return explicit
+}
+
+function formatItemLabel(item: Record<string, unknown>, _mode: 'classic' | 'hermes'): string | null {
+  const type = inferItemType(item)
+  const icon = ITEM_ICONS[type] ?? (/memory/i.test(type) ? '🧠' : /hook/i.test(type) ? '🪝' : '')
   if (!icon) return null
-  if (type === 'commandExecution') {
-    const cmd = typeof item.command === 'string' ? item.command : ''
-    const text = cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd || '执行命令'
-    return mode === 'hermes' ? `${icon} Running: ${text}` : `${icon} ${text}`
-  }
-  if (type === 'fileChange') {
-    const changes = Array.isArray(item.changes) ? item.changes : []
-    const first = asRecord(changes[0])
-    const file = typeof first?.filePath === 'string' ? first.filePath : ''
-    const name = file ? file.split('/').pop() : ''
-    const label = name ? `修改 ${name}` : '修改文件'
-    const text = changes.length > 1 ? `${label} (+${changes.length - 1})` : label
-    return mode === 'hermes' ? `${icon} Editing: ${text}` : `${icon} ${text}`
-  }
-  if (type === 'mcpToolCall') {
-    const tool = typeof item.tool === 'string' ? item.tool : ''
-    const server = typeof item.server === 'string' ? item.server : ''
-    const text = tool || server || '工具调用'
-    return mode === 'hermes' ? `${icon} Tool: ${text}` : `${icon} ${text}`
-  }
-  if (type === 'webSearch') return mode === 'hermes' ? `${icon} Search in progress` : `${icon} 搜索网页`
-  if (type === 'reasoning') return `${icon} Thinking`
-  if (type === 'plan') return mode === 'hermes' ? `${icon} Planning` : `${icon} 制定计划`
-  return `${icon} ${type}`
-}
 
+  let detail = ''
+  switch (type) {
+    case 'reasoning':
+      detail = 'Thinking'
+      break
+    case 'commandExecution':
+      detail = pickString(item, ['command', 'cmd']) || '执行命令'
+      break
+    case 'fileChange':
+      detail = summarizeFileChange(item)
+      break
+    case 'webSearch':
+      detail = pickString(item, ['query', 'searchQuery']) || '搜索网页'
+      break
+    case 'mcpToolCall':
+    case 'dynamicToolCall':
+      detail = summarizeToolCall(item)
+      break
+    case 'memory':
+    case 'memoryRead':
+    case 'memoryWrite':
+      detail = pickString(item, ['key', 'query', 'name', 'content']) || summarizeToolCall(item) || 'Memory'
+      break
+    case 'hook':
+    case 'hookCall':
+      detail = summarizeToolCall(item) || 'Hook'
+      break
+    case 'plan':
+      detail = '制定计划'
+      break
+    case 'imageView':
+      detail = '查看图片'
+      break
+    case 'imageGeneration':
+      detail = '生成图片'
+      break
+    default:
+      detail = summarizeToolCall(item) || type
+  }
+
+  return `${icon} ${ellipsize(detail)}`
+}
 
 function compactThinkingText(text: string): string {
   const cleaned = text
@@ -260,12 +310,9 @@ function extractTextDelta(params: unknown): string {
 }
 
 async function onAgentMessageDelta(threadId: string, params: unknown, ctx: NotificationContext): Promise<void> {
-  if (ctx.streamingConfig?.enabled === false) return
-  const delta = extractTextDelta(params)
-  if (!delta) return
-  const stream = getOrCreateStreaming(threadId, ctx)
-  if (!stream) return
-  await stream.onDelta(delta)
+  // Keep Telegram ordered like WeChat: show tool/status first, then final answer.
+  // Streaming assistant text can arrive before later tool events, causing text → tool disorder.
+  return
 }
 
 async function onReasoningSummaryDelta(threadId: string, params: unknown, ctx: NotificationContext): Promise<void> {
@@ -292,14 +339,10 @@ async function sendFinalReply(threadId: string, raw: string, ctx: NotificationCo
     ? renderTelegramHtmlSegments(raw)
     : renderTelegramMarkdownSegments(raw)
   if (progress) {
-    if (ctx.renderMode === 'hermes') {
-      await ctx.sender.editHtmlMessage(progress.chatId, progress.messageId, segments[0])
-    } else {
-      await ctx.sender.editRichMessage(progress.chatId, progress.messageId, segments[0])
-    }
-    for (const seg of segments.slice(1)) {
-      if (ctx.renderMode === 'hermes') await ctx.sender.sendHtmlMessage(progress.chatId, seg)
-      else await ctx.sender.sendRichMessage(progress.chatId, seg)
+    const chatId = progress.chatId
+    for (const seg of segments) {
+      if (ctx.renderMode === 'hermes') await ctx.sender.sendHtmlMessage(chatId, seg)
+      else await ctx.sender.sendRichMessage(chatId, seg)
     }
     return
   }

@@ -6,7 +6,6 @@ const TELEGRAM_CHANNEL_PREAMBLE = [
   '4. 内容过长时先给摘要版，细节等用户追问再展开。',
   '5. 代码、命令、路径只保留最短必要片段。',
   '6. 输出必须适合 Telegram；纯文本也必须可读。',
-  '7. 除非用户只发纯命令，否则正文开头必须输出简短思路块：第一行「🧠 思路」，后面用 1-3 行短横线列表「- ...」描述，每行不超过 30 字。',
 ].join('\n')
 
 export function buildTelegramTurnText(userText: string): string {
