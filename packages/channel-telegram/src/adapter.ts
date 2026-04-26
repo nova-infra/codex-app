@@ -18,7 +18,7 @@ import {
   sendThreadPicker, sendModelPicker,
   sendReasoningPicker, extractLatestAssistantText,
 } from '@/pickers'
-import { handleNotification, showThinking, type NotificationContext, type TurnProgress, type StreamingState } from '@/notifications'
+import { handleNotification, type NotificationContext, type TurnProgress, type StreamingState } from '@/notifications'
 import { buildTelegramContextSummary } from '@/contextSummary'
 import {
   sendHelp, sendStatus, handleTokenCommand,
@@ -371,7 +371,6 @@ export class TelegramAdapter {
     const reasoning = this.reasoningByChat.get(chatId)
     if (model) params.model = model
     if (reasoning) params.effort = reasoning
-    await showThinking(threadId, this.notifCtx())
     await this.codex.call('turn/start', params)
   }
 
