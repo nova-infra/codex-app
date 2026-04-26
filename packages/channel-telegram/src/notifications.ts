@@ -26,6 +26,12 @@ export type NotificationContext = {
   readonly renderMode: 'classic' | 'hermes'
 }
 
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v !== null && typeof v === 'object' && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : null
+}
+
 function formatItemLabel(item: Record<string, unknown>, _mode: 'classic' | 'hermes'): string | null {
   return formatCodexItemProgress(item, 96)
 }
