@@ -26,12 +26,12 @@ console.log(`[codex-app] Port: ${config.port}, Codex port: ${config.codex.port}`
 
 if (created) {
   console.log(`[codex-app] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
-  console.log(`[codex-app]   首次启动，已自动创建管理员`)
-  console.log(`[codex-app]   用户: admin`)
+  console.log(`[codex-app]   首次启动，已自动创建默认 Agent`)
+  console.log(`[codex-app]   Agent: default`)
   console.log(`[codex-app]   Token 已写入本地配置，请从 ~/.codex-app/config.json 查看`)
   console.log(`[codex-app] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
 } else {
-  console.log(`[codex-app] Users: ${config.users.map(u => u.name).join(', ') || '(none)'}`)
+  console.log(`[codex-app] Agents: ${config.users.map(u => u.name).join(', ') || '(none)'}`)
 }
 
 // Auth

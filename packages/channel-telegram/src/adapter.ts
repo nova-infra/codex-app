@@ -18,7 +18,8 @@ import {
   sendThreadPicker, sendModelPicker,
   sendReasoningPicker, extractLatestAssistantText,
 } from '@/pickers'
-import { handleNotification, type NotificationContext, type TurnProgress, type StreamingState } from '@/notifications'
+import { handleNotification, showThinking, type NotificationContext, type TurnProgress, type StreamingState } from '@/notifications'
+import { buildTelegramContextSummary } from '@/contextSummary'
 import {
   sendHelp, sendStatus, handleTokenCommand,
   handleModelCallback, handleReasoningCallback, handleContextCallback,
@@ -35,6 +36,7 @@ export class TelegramAdapter {
   private readonly lastForwardedTurn = new Map<string, string>()
   private readonly turnProgress = new Map<string, TurnProgress>()
   private readonly streaming = new Map<string, StreamingState>()
+  private readonly thinking = new Map<string, { chatId: number; messageId: number; text: string; lastEditAt: number }>()
   private readonly resumedThreads = new Set<string>()
   private unsubscribe: (() => void) | null = null
 
@@ -81,6 +83,7 @@ export class TelegramAdapter {
       turnProgress: this.turnProgress,
       lastForwardedTurn: this.lastForwardedTurn,
       streaming: this.streaming,
+      thinking: this.thinking,
       stopTyping: chatId => this.stopTyping(chatId),
       readLatestReply: threadId => this.readLatestReply(threadId),
       streamingConfig: this.config.streaming,
@@ -137,7 +140,7 @@ export class TelegramAdapter {
     if (!bound) {
       if (this.config.users.length === 1) {
         await saveBinding({ type: 'telegram', externalId: String(chatId), userId: this.config.users[0].id, updatedAt: new Date().toISOString() })
-        await this.sender.sendMessage(chatId, `已自动绑定用户 ${this.config.users[0].name}，发送 /help 查看可用命令。`)
+        await this.sender.sendMessage(chatId, `已自动绑定 Agent ${this.config.users[0].name}，发送 /help 查看可用命令。`)
         return
       }
       this.awaitingToken.add(chatId)
@@ -248,7 +251,7 @@ export class TelegramAdapter {
 
   private async getBoundUserId(chatId: number): Promise<string> {
     const binding = await findBinding('telegram', String(chatId))
-    if (!binding?.userId) throw new Error('chat is not bound to a user')
+    if (!binding?.userId) throw new Error('chat is not bound to an agent')
     return binding.userId
   }
 
@@ -268,12 +271,22 @@ export class TelegramAdapter {
 
   private async newThread(chatId: number): Promise<string> {
     const userId = await this.getBoundUserId(chatId)
+    const cwd = await this.resolveCwd(chatId)
+    const model = this.modelByChat.get(chatId)
     const threadId = await this.sessions.createChannelThread('telegram', String(chatId), userId, {
-      projectDir: await this.resolveCwd(chatId),
-      model: this.modelByChat.get(chatId),
+      projectDir: cwd,
+      model,
     })
     this.bindThread(chatId, threadId)
-    await this.sender.sendMessage(chatId, `已新建会话：${threadId}`)
+    const summary = await buildTelegramContextSummary({
+      chatId,
+      config: this.config,
+      getUserId: id => this.getBoundUserId(id),
+      model,
+      threadId,
+      cwd,
+    })
+    await this.sender.sendMessage(chatId, ['已新建会话：', ...summary].join('\n'))
     return threadId
   }
 
@@ -358,6 +371,7 @@ export class TelegramAdapter {
     const reasoning = this.reasoningByChat.get(chatId)
     if (model) params.model = model
     if (reasoning) params.effort = reasoning
+    await showThinking(threadId, this.notifCtx())
     await this.codex.call('turn/start', params)
   }
 

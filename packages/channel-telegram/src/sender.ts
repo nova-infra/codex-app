@@ -67,12 +67,12 @@ export class TelegramSender {
 
   async sendRichMessage(chatId: number, markdown: string): Promise<number> {
     try {
-      return await this.sendMessage(chatId, markdownToTelegramMarkdownV2(markdown), { parse_mode: 'MarkdownV2' })
+      return await this.sendHtmlMessage(chatId, markdownToTelegramHtml(markdown))
     } catch (err) {
       if (!this.isFormattingError(err)) throw err
     }
     try {
-      return await this.sendHtmlMessage(chatId, markdownToTelegramHtml(markdown))
+      return await this.sendMessage(chatId, markdownToTelegramMarkdownV2(markdown), { parse_mode: 'MarkdownV2' })
     } catch (err) {
       if (!this.isFormattingError(err)) throw err
       return await this.sendMessage(chatId, markdown)
@@ -81,13 +81,13 @@ export class TelegramSender {
 
   async editRichMessage(chatId: number, messageId: number, markdown: string): Promise<void> {
     try {
-      await this.editMessageText(chatId, messageId, markdownToTelegramMarkdownV2(markdown), 'MarkdownV2')
+      await this.editHtmlMessage(chatId, messageId, markdownToTelegramHtml(markdown))
       return
     } catch (err) {
       if (!this.isFormattingError(err)) throw err
     }
     try {
-      await this.editHtmlMessage(chatId, messageId, markdownToTelegramHtml(markdown))
+      await this.editMessageText(chatId, messageId, markdownToTelegramMarkdownV2(markdown), 'MarkdownV2')
     } catch (err) {
       if (!this.isFormattingError(err)) throw err
       await this.editMessageText(chatId, messageId, markdown)

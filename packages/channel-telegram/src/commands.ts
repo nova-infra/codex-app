@@ -8,6 +8,7 @@ import type { CodexClient, SessionControlService } from '@codex-app/core'
 import type { ReasoningEffort } from '@/types'
 import { REASONING_EFFORTS } from '@/types'
 import type { TelegramSender } from '@/sender'
+import { buildTelegramContextSummary } from '@/contextSummary'
 
 export type CommandContext = {
   readonly sender: TelegramSender
@@ -33,7 +34,7 @@ export async function sendHelp(chatId: number, sender: TelegramSender): Promise<
     '/model - 选择模型',
     '/reasoning - 选择推理深度',
     '/status - 查看状态',
-    '/token - 管理 Token（管理员）',
+    '/token - 管理 Agent Token',
     '/help - 查看命令说明',
   ].join('\n'))
 }
@@ -59,7 +60,7 @@ export async function handleTokenCommand(
 ): Promise<void> {
   const isAdmin = ctx.config.users.length > 0 && ctx.config.users[0].id === userId
   if (!isAdmin) {
-    await ctx.sender.sendMessage(chatId, '仅管理员可执行 /token 命令。')
+    await ctx.sender.sendMessage(chatId, '仅默认 Agent 可执行 /token 命令。')
     return
   }
 
@@ -67,12 +68,12 @@ export async function handleTokenCommand(
   const sub = parts[1] ?? ''
 
   if (sub === 'create') {
-    const name = parts.slice(2).join(' ').trim() || `user-${Date.now().toString(36)}`
+    const name = parts.slice(2).join(' ').trim() || `agent-${Date.now().toString(36)}`
     const result = await addUser(ctx.config, name)
     ctx.onConfigUpdate(result.config)
     await ctx.sender.sendMessage(chatId, [
-      `✅ 用户已创建`,
-      `名称: ${name}`,
+      `✅ Agent 已创建`,
+      `Agent 名称: ${name}`,
       `Token: \`${result.token}\``,
       '',
       '将此 token 发送给对方即可绑定。',
@@ -83,10 +84,10 @@ export async function handleTokenCommand(
   if (sub === 'list') {
     const fresh = await loadConfig()
     const entries = listUsers(fresh)
-    if (entries.length === 0) { await ctx.sender.sendMessage(chatId, '暂无用户。'); return }
+    if (entries.length === 0) { await ctx.sender.sendMessage(chatId, '暂无 Agent。'); return }
     const lines = entries.map(e => {
       const tokens = e.tokens.map(t => `  - ${t.token.slice(0, 8)}... (${t.label ?? ''})`).join('\n')
-      return `👤 ${e.user.name} (${e.user.id})\n${tokens || '  (无 token)'}`
+      return `🤖 ${e.user.name} (${e.user.id})\n${tokens || '  (无 token)'}`
     })
     await ctx.sender.sendMessage(chatId, lines.join('\n\n'))
     return
@@ -119,7 +120,17 @@ export async function handleModelCallback(
   ctx.modelByChat.set(chatId, model)
   await ctx.persistChatState(chatId, { model })
   await ctx.sender.answerCallbackQuery(cbId, '模型已更新')
-  await ctx.sender.sendMessage(chatId, `当前模型：${model}`)
+  const threadId = ctx.chatToThread.get(chatId)
+  const cwd = threadId ? await ctx.getCwd(threadId) : undefined
+  const summary = await buildTelegramContextSummary({
+    chatId,
+    config: ctx.config,
+    getUserId: ctx.getUserId,
+    model,
+    threadId,
+    cwd,
+  })
+  await ctx.sender.sendMessage(chatId, ['模型已更新：', ...summary].join('\n'))
 }
 
 export async function handleReasoningCallback(

@@ -6,6 +6,7 @@ import { randomBytes, createHash } from 'node:crypto'
 import { ILinkClient, type ILinkCdnMedia } from '@/iLinkClient'
 import { buildWeChatSummaryFromFormatted, formatAssistantTextForWeChat, splitWeChatTextSegments } from '@/textFormat'
 import { uploadWeChatCdnEncrypted } from '@/cdnCrypto'
+import { prepareImageForWeChat } from '@/imageCompress'
 
 const ASSISTANT_TEXT_CHUNK = 4000
 const TYPING_TICKET_TTL_MS = 24 * 60 * 60 * 1000
@@ -80,26 +81,34 @@ export class WechatSender {
 
   async sendImage(chatId: string, contextToken: string, imageBuffer: Buffer): Promise<void> {
     if (!contextToken.trim()) throw new Error('Missing context_token for WeChat image send')
+    const preparedBuffer = await prepareImageForWeChat(imageBuffer)
+    if (preparedBuffer.length !== imageBuffer.length) {
+      console.log(`[wechat] compressed image for send: ${imageBuffer.length} -> ${preparedBuffer.length} bytes`)
+    }
     const aesKey = randomBytes(16)
-    const aesKeyBase64 = aesKey.toString('base64')
+    const aesKeyHex = aesKey.toString('hex')
     const filekey = randomBytes(16).toString('hex')
-    const md5 = createHash('md5').update(imageBuffer).digest('hex')
+    const md5 = createHash('md5').update(preparedBuffer).digest('hex')
     const uploadResp = await this.client.getUploadUrl({
       filekey,
       media_type: 1,
       to_user_id: chatId,
-      rawsize: imageBuffer.length,
+      rawsize: preparedBuffer.length,
       rawfilemd5: md5,
-      filesize: imageBuffer.length,
-      aeskey: aesKeyBase64,
+      filesize: Math.ceil((preparedBuffer.length + 1) / 16) * 16,
+      aeskey: aesKeyHex,
       no_need_thumb: true,
     })
     const uploadParam = uploadResp.upload_param
     if (!uploadParam) throw new Error('getUploadUrl: missing upload_param in response')
     const encryptQueryParam = await uploadWeChatCdnEncrypted(
-      imageBuffer, uploadParam, aesKey, filekey, this.cdnBaseUrl,
+      preparedBuffer, uploadParam, aesKey, filekey, this.cdnBaseUrl,
     )
-    const media: ILinkCdnMedia = { encrypt_query_param: encryptQueryParam, aes_key: aesKeyBase64 }
+    const media: ILinkCdnMedia = {
+      encrypt_query_param: encryptQueryParam,
+      aes_key: Buffer.from(aesKeyHex).toString('base64'),
+      encrypt_type: 1,
+    }
     await this.client.sendImage(chatId, contextToken, media)
   }
 

@@ -214,7 +214,7 @@ export async function bootstrapConfig(): Promise<BootstrapResult> {
 
   const newConfig: AppConfig = {
     ...config,
-    users: [{ id: userId, name: 'admin' }],
+    users: [{ id: userId, name: 'default' }],
     tokens: [{ token, userId, label: 'auto-generated' }],
   }
 

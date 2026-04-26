@@ -236,7 +236,6 @@ export function markdownToTelegramMarkdownV2(md: string): string {
 
 export function renderTelegramMarkdownSegments(md: string, maxMarkdownLen = 3200): readonly string[] {
   return splitTelegramMarkdown(md, maxMarkdownLen)
-    .map(chunk => markdownToTelegramMarkdownV2(chunk))
     .filter(Boolean)
 }
 

@@ -36,6 +36,8 @@ export class WechatAdapter {
   private readonly lastForwardedTurn = new Map<string, string>()
   private readonly lastForwardedSig = new Map<string, string>()
   private readonly progressByChatId = new Map<string, { text: string; at: number }>()
+  private readonly thinkingByChatId = new Map<string, { text: string; at: number }>()
+  private readonly verifiedThreadByChatId = new Set<string>()
   private readonly modelByChatId = new Map<string, string>()
   private readonly reasoningByChatId = new Map<string, string>()
   private readonly pendingTokenBind = new Set<string>()
@@ -58,7 +60,7 @@ export class WechatAdapter {
 
   private async getBoundUserId(chatId: string): Promise<string> {
     const binding = await findBinding('wechat', chatId)
-    if (!binding?.userId) throw new Error('chat is not bound to a user')
+    if (!binding?.userId) throw new Error('chat is not bound to an agent')
     return binding.userId
   }
 
@@ -107,7 +109,7 @@ export class WechatAdapter {
       if (this.config.users.length === 1) {
         await saveBinding({ type: 'wechat', externalId: chatId, userId: this.config.users[0].id, updatedAt: new Date().toISOString() })
         const name = this.config.users[0].name
-        await this.sendRaw(chatId, `已自动绑定用户 ${name}，发消息开始使用 Codex。`)
+        await this.sendRaw(chatId, `已自动绑定 Agent ${name}，发消息开始使用 Codex。`)
         return
       }
       this.pendingTokenBind.add(chatId)
@@ -130,7 +132,7 @@ export class WechatAdapter {
     this.sender.beginTypingRefresh(chatId, contextToken)
     try {
       const threadId = await this.ensureThread(chatId)
-      await this.sendProgress(chatId, '已收到，处理中…', true)
+      await this.sendThinking(chatId, '', true)
       const params: Record<string, unknown> = { threadId, input }
       const model = this.modelByChatId.get(chatId)
       const reasoning = this.reasoningByChatId.get(chatId)
@@ -218,9 +220,24 @@ export class WechatAdapter {
       const threadId = this.extractThreadId(event)
       if (!threadId) return
       const chatIds = this.chatIdsByThreadId.get(threadId)
+      const item = asRecord(asRecord(event.raw.params)?.item)
+      const type = typeof item?.type === 'string' ? item.type : ''
+      if (type === 'reasoning') {
+        if (chatIds) for (const chatId of chatIds) await this.sendThinking(chatId, '', false)
+        return
+      }
       const text = formatWechatItemProgress(event.raw.params)
       if (!chatIds || !text) return
       for (const chatId of chatIds) await this.sendProgress(chatId, text)
+      return
+    }
+    if (event.method === 'item/reasoning/summaryTextDelta') {
+      const threadId = this.extractThreadId(event)
+      if (!threadId) return
+      const chatIds = this.chatIdsByThreadId.get(threadId)
+      const delta = typeof asRecord(event.raw.params)?.delta === 'string' ? String(asRecord(event.raw.params)?.delta) : ''
+      if (!chatIds || !delta.trim()) return
+      for (const chatId of chatIds) await this.appendThinking(chatId, delta)
       return
     }
     if (event.method === 'item/completed') {
@@ -245,6 +262,7 @@ export class WechatAdapter {
       const message = `处理失败：${extractWechatErrorMessage(event.raw.params)}`
       for (const chatId of chatIds) {
         this.progressByChatId.delete(chatId)
+        this.thinkingByChatId.delete(chatId)
         this.sender.endTypingIndicator(chatId, this.contextTokenByChatId.get(chatId) ?? '')
         await this.sendRaw(chatId, message)
       }
@@ -265,6 +283,7 @@ export class WechatAdapter {
     for (const cid of chatIds) {
       const token = this.contextTokenByChatId.get(cid) ?? ''
       this.progressByChatId.delete(cid)
+      this.thinkingByChatId.delete(cid)
       await this.sender.sendAssistantReply(cid, token, text)
       this.sender.endTypingIndicator(cid, token)
     }
@@ -283,12 +302,25 @@ export class WechatAdapter {
 
   private async ensureThread(chatId: string): Promise<string> {
     const current = this.threadIdByChatId.get(chatId)
-    if (current) return current
-    const threadId = await this.sessions.ensureChannelThread('wechat', chatId, await this.getBoundUserId(chatId), {
-      projectDir: await this.resolveCwd(chatId),
+    const userId = await this.getBoundUserId(chatId)
+    const projectDir = await this.resolveCwd(chatId)
+    if (current) {
+      if (this.verifiedThreadByChatId.has(chatId)) return current
+      try {
+        await this.sessions.resumeThread(userId, current, projectDir)
+        this.verifiedThreadByChatId.add(chatId)
+        return current
+      } catch (error) {
+        if (!this.isThreadNotFound(error)) throw error
+        await this.clearChatThread(chatId, current)
+      }
+    }
+    const threadId = await this.sessions.createChannelThread('wechat', chatId, userId, {
+      projectDir,
       model: this.modelByChatId.get(chatId),
     })
     this.bindChatToThread(chatId, threadId)
+    this.verifiedThreadByChatId.add(chatId)
     return threadId
   }
 
@@ -301,6 +333,23 @@ export class WechatAdapter {
     return threadId
   }
 
+  private async clearChatThread(chatId: string, threadId?: string): Promise<void> {
+    const current = threadId ?? this.threadIdByChatId.get(chatId)
+    if (current) {
+      const ids = this.chatIdsByThreadId.get(current)
+      ids?.delete(chatId)
+      if (ids?.size === 0) this.chatIdsByThreadId.delete(current)
+    }
+    this.threadIdByChatId.delete(chatId)
+    this.verifiedThreadByChatId.delete(chatId)
+    await updateBinding('wechat', chatId, { threadId: undefined }).catch(() => {})
+  }
+
+  private isThreadNotFound(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error)
+    return /thread not found/i.test(message)
+  }
+
   private bindChatToThread(chatId: string, threadId: string): void {
     const prev = this.threadIdByChatId.get(chatId)
     if (prev && prev !== threadId) {
@@ -308,6 +357,7 @@ export class WechatAdapter {
       prevSet?.delete(chatId)
       if (prevSet?.size === 0) this.chatIdsByThreadId.delete(prev)
     }
+    this.verifiedThreadByChatId.delete(chatId)
     this.threadIdByChatId.set(chatId, threadId)
     const ids = this.chatIdsByThreadId.get(threadId) ?? new Set<string>()
     ids.add(chatId)
@@ -325,6 +375,36 @@ export class WechatAdapter {
     const token = this.contextTokenByChatId.get(chatId) ?? ''
     if (!token) return
     try { await this.sender.sendText(chatId, token, text) } catch { /* best-effort */ }
+  }
+
+
+  private compactThinkingText(text: string): string {
+    const cleaned = text
+      .replace(/[💭🧠]/g, ' ')
+      .replace(/\bThinking\.{0,3}\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    return cleaned.slice(0, 120)
+  }
+
+  private async sendThinking(chatId: string, text: string, force = false): Promise<void> {
+    const compact = this.compactThinkingText(text)
+    const prev = this.thinkingByChatId.get(chatId)
+    if (!compact && prev?.text && !force) return
+    const line = compact ? `🧠 ${compact}` : '🧠 Thinking'
+    const now = Date.now()
+    if (!force) {
+      if (prev?.text === line) return
+      if (prev && now - prev.at < 3500) return
+    }
+    this.thinkingByChatId.set(chatId, { text: line, at: now })
+    await this.sendProgress(chatId, line, force)
+  }
+
+  private async appendThinking(chatId: string, delta: string): Promise<void> {
+    const text = this.compactThinkingText(delta)
+    if (!text) return
+    await this.sendThinking(chatId, text, false)
   }
 
   private async sendProgress(chatId: string, text: string, force = false): Promise<void> {
