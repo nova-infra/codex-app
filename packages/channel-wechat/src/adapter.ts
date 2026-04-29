@@ -261,7 +261,7 @@ export class WechatAdapter {
       if (!chatIds || chatIds.size === 0) return
       if (type !== 'reasoning' && type !== 'userMessage' && type !== 'agentMessage') {
         const text = formatWechatItemProgress(event.raw.params, 'completed')
-        if (text) for (const chatId of chatIds) await this.sendProgress(chatId, text)
+        if (text) for (const chatId of chatIds) await this.sendProgress(chatId, text, true)
       }
       if (type !== 'imageGeneration' && type !== 'imageView') return
       for (const chatId of chatIds) {
@@ -409,7 +409,7 @@ export class WechatAdapter {
     const compact = this.compactThinkingText(text)
     const prev = this.thinkingByChatId.get(chatId)
     if (!compact && prev?.text && !force) return
-    const line = compact ? `🧠 ${compact}` : '🧠 Thinking'
+    const line = compact ? `▸ Thinking ${compact}` : '▸ Thinking'
     const now = Date.now()
     if (!force) {
       if (prev?.text === line) return
