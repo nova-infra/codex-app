@@ -156,6 +156,7 @@ export class WechatAdapter {
       return true
     }
     if (cmd === '/session') { await sendThreadPicker(chatId, this.commandCtx()); return true }
+    if (cmd === '/stop') { await this.stopTurn(chatId); return true }
     if (cmd === '/status') { await sendStatus(chatId, this.commandCtx()); return true }
     if (await handleModelCommand(chatId, cmd, this.commandCtx())) return true
     if (await handleReasoningCommand(chatId, cmd, this.commandCtx())) return true
@@ -175,6 +176,17 @@ export class WechatAdapter {
       return true
     }
     return false
+  }
+
+  private async stopTurn(chatId: string): Promise<void> {
+    const threadId = this.threadIdByChatId.get(chatId)
+    if (!threadId) { await this.sendRaw(chatId, '当前没有会话'); return }
+    const token = this.contextTokenByChatId.get(chatId) ?? ''
+    this.progressByChatId.delete(chatId)
+    this.thinkingByChatId.delete(chatId)
+    this.sender.endTypingIndicator(chatId, token)
+    await this.codex.call('turn/interrupt', { threadId }).catch(() => null)
+    await this.sendRaw(chatId, '已停止当前任务')
   }
 
   private async handleApprovalReply(chatId: string, choice: string): Promise<boolean> {
@@ -245,9 +257,13 @@ export class WechatAdapter {
       if (!threadId) return
       const item = asRecord(asRecord(event.raw.params)?.item)
       const type = typeof item?.type === 'string' ? item.type : ''
-      if (type !== 'imageGeneration' && type !== 'imageView') return
       const chatIds = this.chatIdsByThreadId.get(threadId)
       if (!chatIds || chatIds.size === 0) return
+      if (type !== 'reasoning' && type !== 'userMessage' && type !== 'agentMessage') {
+        const text = formatWechatItemProgress(event.raw.params, 'completed')
+        if (text) for (const chatId of chatIds) await this.sendProgress(chatId, text)
+      }
+      if (type !== 'imageGeneration' && type !== 'imageView') return
       for (const chatId of chatIds) {
         const token = this.contextTokenByChatId.get(chatId) ?? ''
         await relayWechatGeneratedImages(this.sender, chatId, token, item)
@@ -276,19 +292,21 @@ export class WechatAdapter {
     const turnId = this.extractTurnId(event)
     if (turnId && this.lastForwardedTurn.get(threadId) === turnId) return
     const { text, signature } = await this.readLatestAssistant(threadId)
-    const endTyping = (): void => {
-      for (const cid of chatIds) this.sender.endTypingIndicator(cid, this.contextTokenByChatId.get(cid) ?? '')
-    }
-    if (!text || (signature && this.lastForwardedSig.get(threadId) === signature)) { endTyping(); return }
+    const duplicate = !!signature && this.lastForwardedSig.get(threadId) === signature
+    const finalText = text.trim()
+      ? `✅ 结论\n${text.trim()}`
+      : duplicate
+        ? '✅ 结论：执行完成（没有新的文本结论）'
+        : '✅ 结论：执行完成（无文本结论）'
     for (const cid of chatIds) {
       const token = this.contextTokenByChatId.get(cid) ?? ''
       this.progressByChatId.delete(cid)
       this.thinkingByChatId.delete(cid)
-      await this.sender.sendAssistantReply(cid, token, text)
+      await this.sender.sendAssistantReply(cid, token, finalText)
       this.sender.endTypingIndicator(cid, token)
     }
     if (turnId) this.lastForwardedTurn.set(threadId, turnId)
-    if (signature) this.lastForwardedSig.set(threadId, signature)
+    if (signature && !duplicate) this.lastForwardedSig.set(threadId, signature)
   }
 
   private async readLatestAssistant(threadId: string): Promise<{ text: string; signature: string }> {

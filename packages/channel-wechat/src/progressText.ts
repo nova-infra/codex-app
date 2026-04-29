@@ -1,7 +1,7 @@
 import { formatCodexItemProgress } from '@codex-app/core'
 
-export function formatWechatItemProgress(params: unknown): string | null {
-  return formatCodexItemProgress(params, 96)
+export function formatWechatItemProgress(params: unknown, phase: 'started' | 'completed' = 'started'): string | null {
+  return formatCodexItemProgress(params, 96, phase)
 }
 
 function asRecord(v: unknown): Record<string, unknown> | null {

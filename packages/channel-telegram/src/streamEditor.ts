@@ -46,10 +46,10 @@ export class EditStreamEditor {
   async appendText(text: string): Promise<void> {
     if (!text) return
     this.fullRawText += text
-    if (this.fallen) {
-      await this.sender.sendMessage(this.chatId, text)
-      return
-    }
+    // If we fell back due to edit failures (usually flood control), do not
+    // spam Telegram with per-token messages. Keep buffering and rely on
+    // finalize() to deliver the final answer segments.
+    if (this.fallen) return
     this.scheduleEdit()
   }
 
@@ -160,10 +160,12 @@ export class EditStreamEditor {
 
   private onEditFailure(err: unknown): void {
     const message = err instanceof Error ? err.message : String(err)
-    this.failures += 1
     if (this.isFloodControl(message)) {
       this.currentEditInterval = Math.min(this.currentEditInterval * 2, this.cfg.maxEditIntervalMs)
+      // Flood control is temporary; do not treat it as a hard failure.
+      return
     }
+    this.failures += 1
     if (this.failures >= this.cfg.maxEditFailures) {
       this.fallen = true
     }

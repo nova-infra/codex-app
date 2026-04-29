@@ -32,6 +32,7 @@ export async function sendHelp(chatId: string, ctx: WechatCommandContext): Promi
     '/model [名称] - 查看或设置模型',
     '/reasoning [深度] - 查看或设置推理',
     '/status - 查看状态',
+    '/stop - 停止当前任务',
     '/help - 查看指令说明',
   ]
   const threadId = ctx.getThreadId(chatId)

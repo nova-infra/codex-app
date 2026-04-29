@@ -4,6 +4,8 @@ function asRecord(v: unknown): Record<string, unknown> | null {
     : null
 }
 
+export type CodexItemProgressPhase = 'started' | 'completed'
+
 const ITEM_ICONS: Record<string, string> = {
   reasoning: '🧠',
   commandExecution: '⚙️',
@@ -21,6 +23,25 @@ const ITEM_ICONS: Record<string, string> = {
   hookCall: '🪝',
   terminalInteraction: '⌨️',
   commandOutput: '📟',
+}
+
+const TYPE_LABELS: Record<string, string> = {
+  reasoning: '思考',
+  commandExecution: '命令',
+  fileChange: '文件',
+  webSearch: '搜索',
+  mcpToolCall: '工具',
+  dynamicToolCall: '工具',
+  plan: '计划',
+  imageView: '图片',
+  imageGeneration: '图片',
+  memory: '记忆',
+  memoryRead: '记忆',
+  memoryWrite: '记忆',
+  hook: 'Hook',
+  hookCall: 'Hook',
+  terminalInteraction: '终端',
+  commandOutput: '输出',
 }
 
 function compactWhitespace(text: string): string {
@@ -50,7 +71,7 @@ function summarizeFileChange(item: Record<string, unknown>): string {
   const changes = Array.isArray(item.changes) ? item.changes : []
   const first = asRecord(changes[0])
   const file = first ? pickString(first, ['filePath', 'path', 'file', 'name']) : ''
-  const label = file ? `编辑 ${basename(file)}` : '编辑文件'
+  const label = file ? basename(file) : '文件'
   return changes.length > 1 ? `${label} +${changes.length - 1}` : label
 }
 
@@ -73,59 +94,65 @@ function extractItem(params: unknown): Record<string, unknown> | null {
   return asRecord(asRecord(params)?.item)
 }
 
-export function formatCodexItemProgress(paramsOrItem: unknown, maxLen = 96): string | null {
+function progressLabel(type: string): string {
+  if (/memory/i.test(type)) return '记忆'
+  if (/hook/i.test(type)) return 'Hook'
+  return TYPE_LABELS[type] ?? type
+}
+
+function progressIcon(type: string): string {
+  return ITEM_ICONS[type] ?? (/memory/i.test(type) ? '🧠' : /hook/i.test(type) ? '🪝' : '')
+}
+
+function summarizeItem(type: string, item: Record<string, unknown>): string {
+  switch (type) {
+    case 'reasoning':
+      return '正在分析'
+    case 'commandExecution':
+      return pickString(item, ['command', 'cmd']) || '执行命令'
+    case 'fileChange':
+      return summarizeFileChange(item)
+    case 'webSearch':
+      return pickString(item, ['query', 'searchQuery']) || '搜索网页'
+    case 'mcpToolCall':
+    case 'dynamicToolCall':
+      return summarizeToolCall(item)
+    case 'memory':
+    case 'memoryRead':
+    case 'memoryWrite':
+      return pickString(item, ['key', 'query', 'name', 'content']) || summarizeToolCall(item) || 'Memory'
+    case 'hook':
+    case 'hookCall':
+      return summarizeToolCall(item) || 'Hook'
+    case 'plan':
+      return '制定计划'
+    case 'imageView':
+      return '查看图片'
+    case 'imageGeneration':
+      return '生成图片'
+    case 'terminalInteraction':
+      return '等待终端输入'
+    case 'commandOutput':
+      return pickString(item, ['delta', 'text', 'output']) || '命令输出'
+    default:
+      return summarizeToolCall(item) || type
+  }
+}
+
+export function formatCodexItemProgress(
+  paramsOrItem: unknown,
+  maxLen = 96,
+  phase: CodexItemProgressPhase = 'started',
+): string | null {
   const item = extractItem(paramsOrItem) ?? asRecord(paramsOrItem)
   if (!item) return null
   const type = inferItemType(item)
   if (!type || type === 'userMessage' || type === 'agentMessage') return null
-  const icon = ITEM_ICONS[type] ?? (/memory/i.test(type) ? '🧠' : /hook/i.test(type) ? '🪝' : '')
+  const icon = phase === 'completed' ? '✅' : progressIcon(type)
   if (!icon) return null
 
-  let detail = ''
-  switch (type) {
-    case 'reasoning':
-      detail = 'Thinking'
-      break
-    case 'commandExecution':
-      detail = pickString(item, ['command', 'cmd']) || '执行命令'
-      break
-    case 'fileChange':
-      detail = summarizeFileChange(item)
-      break
-    case 'webSearch':
-      detail = pickString(item, ['query', 'searchQuery']) || '搜索网页'
-      break
-    case 'mcpToolCall':
-    case 'dynamicToolCall':
-      detail = summarizeToolCall(item)
-      break
-    case 'memory':
-    case 'memoryRead':
-    case 'memoryWrite':
-      detail = pickString(item, ['key', 'query', 'name', 'content']) || summarizeToolCall(item) || 'Memory'
-      break
-    case 'hook':
-    case 'hookCall':
-      detail = summarizeToolCall(item) || 'Hook'
-      break
-    case 'plan':
-      detail = '制定计划'
-      break
-    case 'imageView':
-      detail = '查看图片'
-      break
-    case 'imageGeneration':
-      detail = '生成图片'
-      break
-    case 'terminalInteraction':
-      detail = '等待终端输入'
-      break
-    case 'commandOutput':
-      detail = pickString(item, ['delta', 'text', 'output']) || '命令输出'
-      break
-    default:
-      detail = summarizeToolCall(item) || type
-  }
-
-  return `${icon} ${ellipsize(detail, maxLen)}`
+  const label = progressLabel(type)
+  const detail = ellipsize(summarizeItem(type, item), maxLen)
+  if (phase === 'completed') return `${icon} ${label}完成：${detail}`
+  return `${icon} ${label}：${detail}`
 }

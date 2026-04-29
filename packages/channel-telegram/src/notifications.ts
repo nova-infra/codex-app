@@ -19,7 +19,7 @@ export type NotificationContext = {
   readonly turnProgress: Map<string, TurnProgress>
   readonly lastForwardedTurn: Map<string, string>
   readonly streaming: Map<string, StreamingState>
-  readonly thinking: Map<string, { chatId: number; messageId: number; text: string; lastEditAt: number }>
+  readonly thinking: Map<string, { chatId: number; messageId: number; text: string; raw: string; lastEditAt: number }>
   readonly stopTyping: (chatId: number) => void
   readonly readLatestReply: (threadId: string) => Promise<string>
   readonly streamingConfig?: TelegramStreamingConfig
@@ -32,8 +32,17 @@ function asRecord(v: unknown): Record<string, unknown> | null {
     : null
 }
 
-function formatItemLabel(item: Record<string, unknown>, _mode: 'classic' | 'hermes'): string | null {
-  return formatCodexItemProgress(item, 96)
+function formatItemLabel(
+  item: Record<string, unknown>,
+  _mode: 'classic' | 'hermes',
+  phase: 'started' | 'completed' = 'started',
+): string | null {
+  return formatCodexItemProgress(item, 96, phase)
+}
+
+function shouldShowCompletion(item: Record<string, unknown> | null): boolean {
+  const type = typeof item?.type === 'string' ? item.type : ''
+  return !!type && !['reasoning', 'userMessage', 'agentMessage'].includes(type)
 }
 
 function compactThinkingText(text: string): string {
@@ -42,41 +51,52 @@ function compactThinkingText(text: string): string {
     .replace(/\bThinking\.{0,3}\b/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  return cleaned.slice(0, 120)
+  return cleaned.slice(-180)
 }
 
 function renderThinkingLine(text: string): string {
-  return text ? `🧠 ${text}` : ''
+  return text ? `🧠 ${text}` : '🧠 思考中…'
 }
 
 async function upsertThinkingLine(threadId: string, delta: string, ctx: NotificationContext): Promise<void> {
-  const text = compactThinkingText(delta)
-  if (!threadId || !text) return
+  if (!threadId || !delta.trim()) return
   const existing = ctx.thinking.get(threadId)
+  const now = Date.now()
   if (existing) {
-    if (!text) return
-    const nextLine = renderThinkingLine(text)
-    const now = Date.now()
-    if (now - existing.lastEditAt > 2500 && nextLine !== existing.text) {
-      await ctx.sender.editMessageText(existing.chatId, existing.messageId, nextLine)
-      ctx.thinking.set(threadId, { ...existing, text: nextLine, lastEditAt: now })
+    const raw = `${existing.raw}${delta}`
+    const nextLine = renderThinkingLine(compactThinkingText(raw))
+    const nextState = { ...existing, raw, text: nextLine }
+    if (now - existing.lastEditAt <= 2000 || nextLine === existing.text) {
+      ctx.thinking.set(threadId, nextState)
       return
     }
-    ctx.thinking.set(threadId, { ...existing, text: nextLine })
+    try {
+      await ctx.sender.editMessageText(existing.chatId, existing.messageId, nextLine)
+      ctx.thinking.set(threadId, { ...nextState, lastEditAt: now })
+    } catch {
+      // Never create a new bubble for the same reasoning stream. Keep buffering
+      // and retry editing the original message on later deltas.
+      ctx.thinking.set(threadId, nextState)
+    }
     return
   }
-  const line = renderThinkingLine(text)
   const chatIds = ctx.threadToChats.get(threadId)
   if (!chatIds?.size) return
   const chatId = chatIds.values().next().value!
+  const line = renderThinkingLine(compactThinkingText(delta))
   const messageId = await ctx.sender.sendMessage(chatId, line)
-  if (messageId) ctx.thinking.set(threadId, { chatId, messageId, text: line, lastEditAt: Date.now() })
+  if (messageId) ctx.thinking.set(threadId, { chatId, messageId, text: line, raw: delta, lastEditAt: now })
 }
 
 async function closeThinkingLine(threadId: string, ctx: NotificationContext): Promise<void> {
   const state = ctx.thinking.get(threadId)
   if (!state) return
   ctx.thinking.delete(threadId)
+  const text = compactThinkingText(state.raw).replace(/思考中…?/g, '').trim()
+  if (!text) {
+    await ctx.sender.deleteMessage(state.chatId, state.messageId).catch(() => {})
+    return
+  }
   await ctx.sender.editMessageText(state.chatId, state.messageId, state.text).catch(() => {})
 }
 
@@ -162,32 +182,23 @@ async function updateProgressCard(threadId: string, label: string, ctx: Notifica
   ctx.turnProgress.set(threadId, { chatId, messageId, steps: [text], lastEditAt: Date.now() })
 }
 
-async function completeProgressCard(threadId: string, label: string, ctx: NotificationContext): Promise<void> {
-  const progress = ctx.turnProgress.get(threadId)
-  if (!progress) return
-  const started = ctx.renderMode === 'hermes' ? `• ${label}` : `⏳ ${label}`
-  const completed = ctx.renderMode === 'hermes' ? `✓ ${label}` : `✅ ${label}`
-  const steps = foldProgressSteps(progress.steps.map(step => (step === started ? completed : step)))
-  const now = Date.now()
-  if (now - progress.lastEditAt > 800) {
-    await ctx.sender.editMessageText(progress.chatId, progress.messageId, steps.join('\n'))
-    ctx.turnProgress.set(threadId, { ...progress, steps, lastEditAt: now })
-    return
-  }
-  ctx.turnProgress.set(threadId, { ...progress, steps })
-}
-
 async function onItemStarted(threadId: string, params: unknown, ctx: NotificationContext): Promise<void> {
   const item = asRecord(asRecord(params)?.item)
   const type = typeof item?.type === 'string' ? item.type : ''
-  if (type === 'reasoning') return
+  if (type === 'reasoning') {
+    await upsertThinkingLine(threadId, '思考中…', ctx)
+    return
+  }
   const label = item ? formatItemLabel(item, ctx.renderMode) : null
   if (label) await updateProgressCard(threadId, label, ctx)
 }
 
 async function onItemCompleted(threadId: string, params: unknown, ctx: NotificationContext): Promise<void> {
-  // Do not emit progress cards. Keep image relay for image-capable items.
   await maybeSendImage(threadId, params, ctx)
+  const item = asRecord(asRecord(params)?.item)
+  if (!shouldShowCompletion(item)) return
+  const label = formatItemLabel(item, ctx.renderMode, 'completed')
+  if (label) await updateProgressCard(threadId, label, ctx)
 }
 
 function extractTextDelta(params: unknown): string {
@@ -224,21 +235,13 @@ async function finalizeTurn(threadId: string, raw: string, ctx: NotificationCont
 }
 
 async function sendFinalReply(threadId: string, raw: string, ctx: NotificationContext): Promise<void> {
-  const progress = ctx.turnProgress.get(threadId)
   const chatIds = ctx.threadToChats.get(threadId)
   ctx.turnProgress.delete(threadId)
-  if (!raw || !chatIds?.size) return
+  if (!chatIds?.size) return
+  const text = raw.trim() ? `✅ 结论\n${raw.trim()}` : '✅ 结论：执行完成（无文本结论）'
   const segments = ctx.renderMode === 'hermes'
-    ? renderTelegramHtmlSegments(raw)
-    : renderTelegramMarkdownSegments(raw)
-  if (progress) {
-    const chatId = progress.chatId
-    for (const seg of segments) {
-      if (ctx.renderMode === 'hermes') await ctx.sender.sendHtmlMessage(chatId, seg)
-      else await ctx.sender.sendRichMessage(chatId, seg)
-    }
-    return
-  }
+    ? renderTelegramHtmlSegments(text)
+    : renderTelegramMarkdownSegments(text)
   for (const chatId of chatIds) {
     for (const seg of segments) {
       if (ctx.renderMode === 'hermes') await ctx.sender.sendHtmlMessage(chatId, seg)

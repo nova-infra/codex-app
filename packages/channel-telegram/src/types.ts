@@ -49,6 +49,7 @@ export const BOT_COMMANDS: readonly TelegramCommand[] = [
   { command: 'model', description: '选择模型' },
   { command: 'reasoning', description: '选择推理深度' },
   { command: 'status', description: '查看状态' },
+  { command: 'stop', description: '停止当前任务' },
   { command: 'help', description: '查看命令说明' },
 ]
 

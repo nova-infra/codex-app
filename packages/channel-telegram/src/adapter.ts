@@ -36,7 +36,7 @@ export class TelegramAdapter {
   private readonly lastForwardedTurn = new Map<string, string>()
   private readonly turnProgress = new Map<string, TurnProgress>()
   private readonly streaming = new Map<string, StreamingState>()
-  private readonly thinking = new Map<string, { chatId: number; messageId: number; text: string; lastEditAt: number }>()
+  private readonly thinking = new Map<string, { chatId: number; messageId: number; text: string; raw: string; lastEditAt: number }>()
   private readonly resumedThreads = new Set<string>()
   private unsubscribe: (() => void) | null = null
 
@@ -154,6 +154,7 @@ export class TelegramAdapter {
       return
     }
     if (text === '/status') { await sendStatus(chatId, this.cmdCtx()); return }
+    if (text === '/stop') { await this.stopTurn(chatId); return }
     if (text === '/model') { await sendModelPicker(chatId, this.codex, this.sender); return }
     if (text === '/reasoning') { await sendReasoningPicker(chatId, this.sender); return }
     if (text.startsWith('/token')) { await handleTokenCommand(chatId, text, bound.userId, this.cmdCtx()); return }
@@ -322,6 +323,17 @@ export class TelegramAdapter {
       threadId,
     )
     this.bindThread(chatId, threadId)
+  }
+
+  private async stopTurn(chatId: number): Promise<void> {
+    const threadId = this.chatToThread.get(chatId)
+    if (!threadId) { await this.sender.sendMessage(chatId, '当前没有会话'); return }
+    this.stopTyping(chatId)
+    this.turnProgress.delete(threadId)
+    this.streaming.delete(threadId)
+    this.thinking.delete(threadId)
+    await this.codex.call('turn/interrupt', { threadId }).catch(() => null)
+    await this.sender.sendMessage(chatId, '已停止当前任务')
   }
 
   private async compactThread(chatId: number): Promise<void> {

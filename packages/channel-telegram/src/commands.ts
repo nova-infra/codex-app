@@ -34,6 +34,7 @@ export async function sendHelp(chatId: number, sender: TelegramSender): Promise<
     '/model - 选择模型',
     '/reasoning - 选择推理深度',
     '/status - 查看状态',
+    '/stop - 停止当前任务',
     '/token - 管理 Agent Token',
     '/help - 查看命令说明',
   ].join('\n'))
