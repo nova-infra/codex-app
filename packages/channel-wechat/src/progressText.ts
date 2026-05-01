@@ -1,3 +1,4 @@
+import { formatCodexItemProgress } from '@codex-app/core'
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
     ? (v as Record<string, unknown>)
@@ -61,43 +62,7 @@ function linePrefix(phase: ProgressPhase): string {
 }
 
 export function formatWechatItemProgress(params: unknown, phase: ProgressPhase = 'started'): string | null {
-  const item = itemFrom(params)
-  if (!item) return null
-  const type = inferType(item)
-  if (!type || type === 'userMessage' || type === 'agentMessage' || type === 'reasoning') return null
-  const prefix = linePrefix(phase)
-  const done = phase === 'completed' ? ' 完成' : ''
-
-  switch (type) {
-    case 'commandExecution':
-      return `${prefix} Shell${done} ${ellipsize(pickString(item, ['command', 'cmd']) || '执行命令', 88)}`
-    case 'webSearch':
-      return `${prefix} Search${done} ${ellipsize(pickString(item, ['query', 'searchQuery']) || '搜索网页', 88)}`
-    case 'mcpToolCall':
-    case 'dynamicToolCall':
-      return `${prefix} Tool${done} ${ellipsize(toolName(item), 88)}`
-    case 'fileChange':
-      return `${prefix} Edit${done} ${ellipsize(fileChangeName(item), 88)}`
-    case 'imageGeneration':
-      return `${prefix} Image${done} 生成图片`
-    case 'imageView':
-      return `${prefix} Image${done} 查看图片`
-    case 'plan':
-      return `${prefix} Plan${done} 制定计划`
-    case 'terminalInteraction':
-      return `${prefix} Terminal${done} 等待终端输入`
-    case 'commandOutput':
-      return `${prefix} Output${done} ${ellipsize(pickString(item, ['delta', 'text', 'output']) || '命令输出', 88)}`
-    case 'memory':
-    case 'memoryRead':
-    case 'memoryWrite':
-      return `${prefix} Memory${done} ${ellipsize(pickString(item, ['key', 'query', 'name', 'content']) || toolName(item), 88)}`
-    case 'hook':
-    case 'hookCall':
-      return `${prefix} Hook${done} ${ellipsize(toolName(item), 88)}`
-    default:
-      return `${prefix} ${type}${done} ${ellipsize(toolName(item), 88)}`
-  }
+  return formatCodexItemProgress(params, 96, phase)
 }
 
 export function extractWechatErrorMessage(params: unknown): string {

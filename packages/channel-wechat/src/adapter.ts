@@ -132,7 +132,6 @@ export class WechatAdapter {
     this.sender.beginTypingRefresh(chatId, contextToken)
     try {
       const threadId = await this.ensureThread(chatId)
-      await this.sendThinking(chatId, '', true)
       const params: Record<string, unknown> = { threadId, input }
       const model = this.modelByChatId.get(chatId)
       const reasoning = this.reasoningByChatId.get(chatId)
@@ -234,10 +233,7 @@ export class WechatAdapter {
       const chatIds = this.chatIdsByThreadId.get(threadId)
       const item = asRecord(asRecord(event.raw.params)?.item)
       const type = typeof item?.type === 'string' ? item.type : ''
-      if (type === 'reasoning') {
-        if (chatIds) for (const chatId of chatIds) await this.sendThinking(chatId, '', false)
-        return
-      }
+      if (type === 'reasoning') return
       const text = formatWechatItemProgress(event.raw.params)
       if (!chatIds || !text) return
       for (const chatId of chatIds) await this.sendProgress(chatId, text)
@@ -365,7 +361,7 @@ export class WechatAdapter {
 
   private isThreadNotFound(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error)
-    return /thread not found/i.test(message)
+    return /thread not found|no rollout found/i.test(message)
   }
 
   private bindChatToThread(chatId: string, threadId: string): void {
@@ -400,6 +396,7 @@ export class WechatAdapter {
     const cleaned = text
       .replace(/[💭🧠]/g, ' ')
       .replace(/\bThinking\.{0,3}\b/gi, ' ')
+      .replace(/思考中…?/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
     return cleaned.slice(0, 120)
@@ -409,7 +406,7 @@ export class WechatAdapter {
     const compact = this.compactThinkingText(text)
     const prev = this.thinkingByChatId.get(chatId)
     if (!compact && prev?.text && !force) return
-    const line = compact ? `▸ Thinking ${compact}` : '▸ Thinking'
+    const line = compact ? `🧠 ${compact}` : '🧠 思考中…'
     const now = Date.now()
     if (!force) {
       if (prev?.text === line) return

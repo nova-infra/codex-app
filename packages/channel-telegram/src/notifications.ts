@@ -49,6 +49,7 @@ function compactThinkingText(text: string): string {
   const cleaned = text
     .replace(/[💭🧠]/g, ' ')
     .replace(/\bThinking\.{0,3}\b/gi, ' ')
+    .replace(/思考中…?/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
   return cleaned.slice(-180)
@@ -62,7 +63,9 @@ async function upsertThinkingLine(threadId: string, delta: string, ctx: Notifica
   if (!threadId || !delta.trim()) return
   const existing = ctx.thinking.get(threadId)
   const now = Date.now()
+  const cleanDelta = compactThinkingText(delta)
   if (existing) {
+    if (!cleanDelta) return
     const raw = `${existing.raw}${delta}`
     const nextLine = renderThinkingLine(compactThinkingText(raw))
     const nextState = { ...existing, raw, text: nextLine }
@@ -83,9 +86,10 @@ async function upsertThinkingLine(threadId: string, delta: string, ctx: Notifica
   const chatIds = ctx.threadToChats.get(threadId)
   if (!chatIds?.size) return
   const chatId = chatIds.values().next().value!
-  const line = renderThinkingLine(compactThinkingText(delta))
+  const line = renderThinkingLine(cleanDelta)
+  const raw = cleanDelta ? delta : ''
   const messageId = await ctx.sender.sendMessage(chatId, line)
-  if (messageId) ctx.thinking.set(threadId, { chatId, messageId, text: line, raw: delta, lastEditAt: now })
+  if (messageId) ctx.thinking.set(threadId, { chatId, messageId, text: line, raw, lastEditAt: now })
 }
 
 async function closeThinkingLine(threadId: string, ctx: NotificationContext): Promise<void> {
@@ -185,10 +189,7 @@ async function updateProgressCard(threadId: string, label: string, ctx: Notifica
 async function onItemStarted(threadId: string, params: unknown, ctx: NotificationContext): Promise<void> {
   const item = asRecord(asRecord(params)?.item)
   const type = typeof item?.type === 'string' ? item.type : ''
-  if (type === 'reasoning') {
-    await upsertThinkingLine(threadId, '思考中…', ctx)
-    return
-  }
+  if (type === 'reasoning') return
   const label = item ? formatItemLabel(item, ctx.renderMode) : null
   if (label) await updateProgressCard(threadId, label, ctx)
 }
