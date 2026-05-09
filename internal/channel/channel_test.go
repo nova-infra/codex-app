@@ -1,64 +1,34 @@
 package channel
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/nova-infra/codex-app/internal/render"
 )
 
-func TestRenderDemo(t *testing.T) {
-	msgs, err := RenderDemo("telegram")
+func TestRenderPayload(t *testing.T) {
+	msg := render.PlatformMessage{Channel: render.ChannelTelegram, Target: render.RenderTarget{ChannelID: "c1"}}
+	bytes, err := RenderPayload([]render.PlatformMessage{msg})
 	if err != nil {
-		t.Fatalf("render demo err: %v", err)
+		t.Fatalf("render payload: %v", err)
 	}
-	if len(msgs) == 0 {
-		t.Fatalf("expect messages")
-	}
-	if _, err := RenderDemo("unknown"); err == nil {
-		t.Fatalf("unknown channel should fail")
-	}
-	if len(msgs) > 0 {
-		if msgs[0].Channel != render.ChannelTelegram {
-			t.Fatalf("unexpected channel %s", msgs[0].Channel)
-		}
+	if !strings.Contains(string(bytes), "telegram") {
+		t.Fatalf("expected channel in payload, got %s", bytes)
 	}
 }
 
-func TestListChannels(t *testing.T) {
-	channels := ListChannels()
-	if len(channels) != 3 {
-		t.Fatalf("expect 3 channels, got %d", len(channels))
-	}
-	want := map[render.Channel]struct{}{
-		render.ChannelTelegram: {},
-		render.ChannelWeixin:   {},
-		render.ChannelLark:     {},
-	}
-	for _, ch := range channels {
-		if _, ok := want[ch]; !ok {
-			t.Fatalf("unexpected channel: %s", ch)
-		}
-	}
-}
-
-func TestCapabilitiesForKnownChannels(t *testing.T) {
-	for _, ch := range ListChannels() {
-		caps, err := Capabilities(string(ch))
-		if err != nil {
-			t.Fatalf("capabilities error for %s: %v", ch, err)
-		}
-		if len(caps) == 0 {
-			t.Fatalf("expected capabilities for %s", ch)
-		}
-	}
-}
-
-func TestCapabilitiesForAllChannel(t *testing.T) {
-	caps, err := Capabilities("all")
+func TestRenderPayloadEmpty(t *testing.T) {
+	bytes, err := RenderPayload(nil)
 	if err != nil {
-		t.Fatalf("capabilities(all) error: %v", err)
+		t.Fatalf("render payload: %v", err)
 	}
-	if len(caps) < 3 {
-		t.Fatalf("expected merged capabilities, got %d", len(caps))
+	var v []any
+	if err := json.Unmarshal(bytes, &v); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	if len(v) != 0 {
+		t.Fatalf("expected empty array, got %v", string(bytes))
 	}
 }

@@ -58,6 +58,13 @@ func ListDemoProviders() []string {
 	return provider.ListDemo()
 }
 
+func (c Config) RuntimeProject(projectName string) string {
+	if strings.TrimSpace(projectName) != "" {
+		return strings.TrimSpace(projectName)
+	}
+	return "default"
+}
+
 // Validate checks top-level config plus nested provider/project entries.
 func (c Config) Validate() error {
 	if strings.TrimSpace(c.DataDir) == "" {

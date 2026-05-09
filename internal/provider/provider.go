@@ -66,3 +66,16 @@ func (c Config) Validate() error {
 	}
 	return nil
 }
+
+// ResolveProvider returns a provider by name.
+func ResolveProvider(providers []Config, name string) (Config, error) {
+	if len(providers) == 0 {
+		return Config{}, fmt.Errorf("providers are required")
+	}
+	for _, provider := range providers {
+		if provider.Name == name {
+			return provider, nil
+		}
+	}
+	return Config{}, fmt.Errorf("provider %q not found", name)
+}

@@ -21,7 +21,14 @@ Go 的优势包括：
 - 代码组织与 `runtime`、`session`、`channel` 的收敛方向一致
 - 为后续 `serve / doctor / runtime` 命令演进预留稳定接口
 
-## 第一批真实任务
+## 第一批真实任务（Go 主线已打通）
+
+## Smoke 验收（默认入口）
+
+- `go run ./cmd/codex-app doctor`
+- `go run ./cmd/codex-app serve --dry-run`
+
+Bun/TS 入口保留为 legacy，仅作历史兼容，不作为默认路径。
 
 CLI 第一批只做这些可复用任务：
 
@@ -338,3 +345,9 @@ CLI 在总架构里属于 `Assembly & Ops` 层：
 标准化后的 CLI 不再只是“几个装配命令”，而是：
 
 **一个围绕 preset、module registry、config 和 doctor 构建的稳定命令层。**
+
+## Go 入口验收
+
+- `go run ./cmd/codex-app doctor`
+- `go run ./cmd/codex-app serve --dry-run`
+- `go run ./cmd/codex-app --help`

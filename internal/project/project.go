@@ -2,6 +2,7 @@ package project
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -92,5 +93,35 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.CodexHome) == "" {
 		return fmt.Errorf("project %q: codex_home is required", c.Name)
 	}
+	if err := c.ValidateCodexHome(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// ValidateCodexHome checks project-local CODEX_HOME is syntactically valid.
+func (c Config) ValidateCodexHome() error {
+	if strings.TrimSpace(c.CodexHome) == "" {
+		return fmt.Errorf("project %q: codex_home is required", c.Name)
+	}
+	if filepath.Clean(c.CodexHome) == "." {
+		return fmt.Errorf("project %q: codex_home must be explicit", c.Name)
+	}
+	return nil
+}
+
+// ResolveProject returns the named project. If empty, it returns the first project.
+func ResolveProject(projects []Config, name string) (Config, error) {
+	if len(projects) == 0 {
+		return Config{}, fmt.Errorf("projects are required")
+	}
+	if name == "" {
+		return projects[0], nil
+	}
+	for _, project := range projects {
+		if project.Name == name {
+			return project, nil
+		}
+	}
+	return Config{}, fmt.Errorf("project %q not found", name)
 }

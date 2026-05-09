@@ -14,7 +14,7 @@ func TestRunHelp(t *testing.T) {
 	if err := run([]string{"help"}, &out); err != nil {
 		t.Fatalf("run help: %v", err)
 	}
-	for _, want := range []string{"render-demo", "project list", "provider list", "capabilities list"} {
+	for _, want := range []string{"render-demo", "project list", "provider list", "capabilities list", "doctor", "serve"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("help missing %s: %s", want, out.String())
 		}

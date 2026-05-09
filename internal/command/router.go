@@ -11,6 +11,8 @@ import (
 
 	"github.com/nova-infra/codex-app/internal/channel"
 	"github.com/nova-infra/codex-app/internal/kernel"
+	"github.com/nova-infra/codex-app/internal/runtime"
+	"github.com/nova-infra/codex-app/internal/server"
 )
 
 const usage = `codex-app Go preview
@@ -20,6 +22,8 @@ Usage:
   codex-app project list
   codex-app provider list
   codex-app capabilities list [--channel <telegram|wechat|lark|all>]
+  codex-app serve [--dry-run] [--project <name>]
+  codex-app doctor
   codex-app help
 
 The Go preview is milestone 2 of the rewrite. It renders a mock Codex event
@@ -123,9 +127,51 @@ func (r *Router) Run(args []string) error {
 		return r.runProvider(args[1:])
 	case "capabilities":
 		return r.runCapabilities(args[1:])
+	case "doctor":
+		return r.runDoctor(args[1:])
+	case "serve":
+		return r.runServe(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 	}
+}
+
+func (r *Router) runDoctor(args []string) error {
+	jsonMode, args := parseJSONCommand(args)
+	if len(args) != 0 {
+		return errors.New("doctor does not accept positional arguments")
+	}
+	report := runtime.RunDoctor()
+	if jsonMode {
+		return printJSON(r.out, map[string]any{
+			"ok":   report.Ok(),
+			"data": report.Checks,
+			"meta": map[string]string{"command": "doctor"},
+		})
+	}
+	if report.Ok() {
+		_, err := fmt.Fprintln(r.out, "doctor: ok")
+		if err != nil {
+			return err
+		}
+	}
+	for _, check := range report.Checks {
+		_, err := fmt.Fprintf(r.out, "- %s: %s", check.Name, check.Status)
+		if err != nil {
+			return err
+		}
+		if check.Detail != "" {
+			_, err = fmt.Fprintf(r.out, " (%s)", check.Detail)
+			if err != nil {
+				return err
+			}
+		}
+		_, err = fmt.Fprintln(r.out)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Router) runRenderDemo(args []string) error {
@@ -151,6 +197,36 @@ func (r *Router) runRenderDemo(args []string) error {
 		return err
 	}
 	_, err = io.WriteString(r.out, "\n")
+	return err
+}
+
+func (r *Router) runServe(args []string) error {
+	jsonMode, args := parseJSONCommand(args)
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	dryRun := fs.Bool("dry-run", false, "print startup plan without starting")
+	projectName := fs.String("project", "", "project name to use")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return errors.New("serve does not accept positional arguments")
+	}
+	plan, err := server.NewServePlan(*dryRun, *projectName)
+	if err != nil {
+		return err
+	}
+	if jsonMode {
+		return printJSON(r.out, map[string]any{
+			"ok":   true,
+			"data": map[string]any{"project": *projectName, "dry_run": *dryRun, "plan": plan.Plan},
+		})
+	}
+	msg, err := server.Start(server.ServeOptions{DryRun: *dryRun, ProjectName: *projectName})
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(r.out, msg)
 	return err
 }
 

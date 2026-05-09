@@ -89,6 +89,41 @@ func TestRunCapabilitiesListJSON(t *testing.T) {
 	}
 }
 
+func TestRunDoctor(t *testing.T) {
+	var out bytes.Buffer
+	r := NewRouter(&out)
+	if err := r.Run([]string{"doctor"}); err != nil {
+		t.Fatalf("run doctor: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "go:") && !strings.Contains(got, "doctor:") {
+		t.Fatalf("unexpected doctor output: %q", got)
+	}
+}
+
+func TestRunDoctorJSON(t *testing.T) {
+	var out bytes.Buffer
+	r := NewRouter(&out)
+	if err := r.Run([]string{"doctor", "--json"}); err != nil {
+		t.Fatalf("run doctor json: %v", err)
+	}
+	if !strings.Contains(out.String(), "\"ok\": true") && !strings.Contains(out.String(), "\"ok\": false") {
+		t.Fatalf("doctor json output invalid: %q", out.String())
+	}
+}
+
+func TestRunServeDryRunJSON(t *testing.T) {
+	var out bytes.Buffer
+	r := NewRouter(&out)
+	if err := r.Run([]string{"serve", "--dry-run", "--json"}); err != nil {
+		t.Fatalf("run serve dry-run: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "\"dry_run\": true") {
+		t.Fatalf("expect dry_run true in output: %q", got)
+	}
+}
+
 func TestRunProviderListError(t *testing.T) {
 	var out bytes.Buffer
 	r := NewRouter(&out, WithListProviders(func() ([]string, error) {
