@@ -1,12 +1,18 @@
 {
   "name": "codex-app",
   "private": true,
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "bun run packages/server/src/index.ts",
-    "cli": "bun run packages/cli/src/main.ts",
-    "build": "bun build packages/server/src/index.ts --compile --outfile codex-app-server",
-    "test:e2e": "bun test ./test/e2e/*.ts",
+    "dev": "go run ./cmd/codex-app serve --help",
+    "go:doctor": "go run ./cmd/codex-app doctor",
+    "go:smoke": "go run ./cmd/codex-app doctor && go run ./cmd/codex-app serve --dry-run && go run ./cmd/codex-app render-demo --channel all --json",
+    "go:serve-dry-run": "go run ./cmd/codex-app serve --dry-run",
+    "legacy:dev": "bun run packages/server/src/index.ts",
+    "legacy:cli": "bun run packages/cli/src/main.ts",
+    "legacy:test": "bun test ./test/e2e/*.ts",
+    "legacy:build": "bun build packages/server/src/index.ts --compile --outfile codex-app-server",
     "graphify": "bash scripts/graphify.sh",
     "changeset": "changeset",
     "changeset:status": "changeset status --since=origin/main",

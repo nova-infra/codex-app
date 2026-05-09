@@ -7,13 +7,19 @@
 ## 定位
 
 - 二进制名：`codex-app`
-- 实现语言：`TypeScript + Bun`
+- 实现语言：`Go`（主线）；Bun/TS 保留为 legacy 兼容入口
 - 角色：本地装配器、检查器、配置读写入口
 - 非目标：不复制一套 server，不接管 channel 运行时，不绕过 kernel contract
 
-## 为什么用 TypeScript + Bun
+## 为什么用 Go（主线）
 
-当前仓库本身就是 Bun/TypeScript workspace，CLI 需要复用现有配置模型、preset 定义和模块边界；继续沿用 Bun/TS，比额外引入 Rust CLI 更稳，也更低摩擦。
+当前仓库已进入 Go 重写主线。Bun/TS 仍保留做历史对照与迁移参考，不作为默认开发入口。
+
+Go 的优势包括：
+
+- 统一运行时能力边界，更易承载长期服务生命周期
+- 代码组织与 `runtime`、`session`、`channel` 的收敛方向一致
+- 为后续 `serve / doctor / runtime` 命令演进预留稳定接口
 
 ## 第一批真实任务
 
@@ -89,7 +95,7 @@ codex-app
 
 用途：
 
-- 检查 Bun、Codex CLI、配置文件、工作目录、端口占用、必要运行目录
+- 检查 Go CLI、配置文件、工作目录、端口占用、必要运行目录
 
 要求：
 
@@ -222,6 +228,21 @@ codex-app
 - JSON 只写 stdout
 - 诊断信息走 stderr
 - 不能输出 token、cookie、敏感路径内容
+
+## Go 主线日常验收（Smoke）
+
+重写主线变更后的最小冒烟命令：
+
+```bash
+go run ./cmd/codex-app doctor
+go run ./cmd/codex-app serve --dry-run
+go run ./cmd/codex-app project list
+go run ./cmd/codex-app provider list
+go run ./cmd/codex-app capabilities list --channel all
+go run ./cmd/codex-app render-demo --channel all --json
+```
+
+其中 Bun 入口（如 `legacy:cli` / `legacy:dev`）仅作为参考，默认不再作为开发主入口。
 
 ## 配置优先级
 
