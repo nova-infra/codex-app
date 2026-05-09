@@ -6,6 +6,7 @@
     "dev": "bun run packages/server/src/index.ts",
     "cli": "bun run packages/cli/src/main.ts",
     "build": "bun build packages/server/src/index.ts --compile --outfile codex-app-server",
+    "test:e2e": "bun test ./test/e2e/*.ts",
     "graphify": "bash scripts/graphify.sh",
     "changeset": "changeset",
     "changeset:status": "changeset status --since=origin/main",

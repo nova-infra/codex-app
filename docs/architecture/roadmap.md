@@ -7,7 +7,7 @@
 ## 目标
 
 - 保留同仓库模块化，不做运行时外部插件系统
-- `web / wechat / telegram / cli` 进入当前规划范围
+- `wechat / telegram / cli` 进入当前实现范围；`feishu / lark` 进入规划范围；Web channel 暂时冻结
 - `rn` 短期冻结，不进入当前重构主线
 - 内核只保留稳定 contract、session、event、approval、codex transport
 - `skill / tool / mcp / provider / storage` 全部进入 capability registry
@@ -29,9 +29,9 @@
 
 先把 `kernel` 与 `capability` 边界拉直，再考虑新增 channel 或功能。
 
-### 2. Web 是能力之一，不是架构中心
+### 2. 社交软件入口优先
 
-`web` 可以是重要入口，但不能让内核依赖 `web` 特有实现。
+短期不推进 Web channel，优先把 Telegram / 微信等社交软件入口的 contract、session、approval 与事件渲染收敛稳定；Feishu / Lark 作为下一批社交 channel 规划项。
 
 ### 3. Channel 只做适配，不做真相源
 
@@ -39,7 +39,7 @@ channel 只能处理输入输出与交互差异，不能私自拥有 session、a
 
 ### 4. preset 取代分叉
 
-`minimal / web-only / wechat-only / full` 都来自一套模块组合，不再复制多份 server。
+`minimal / telegram-only / wechat-only / social` 都来自一套模块组合，不再复制多份 server。
 
 ## 模块保留策略
 
@@ -58,6 +58,7 @@ channel 只能处理输入输出与交互差异，不能私自拥有 session、a
 
 - `channel-wechat`
 - `channel-telegram`
+- `channel-lark` / `channel-feishu`（规划，暂不实现）
 - `image-relay`
 - `notification-adapter`
 - `account-source`
@@ -124,7 +125,7 @@ channel 只能处理输入输出与交互差异，不能私自拥有 session、a
 
 目标：
 
-- `web / wechat / telegram` 全部走统一 channel 接口
+- `wechat / telegram` 先走统一 channel 接口，`feishu / lark` 在 contract 稳定后接入，Web 暂时不进入主线
 - CLI 能按 preset 装配 channel 与 capability
 
 涉及模块：

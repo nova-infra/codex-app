@@ -20,7 +20,7 @@ const HELP = [
   '  config view',
   '  config get <path>',
   '  assemble apply <preset> [--dry-run]',
-  '  assemble apply custom --channel web=on --capability mcp=off [--dry-run]',
+  '  assemble apply custom --channel telegram=on --capability mcp=off [--dry-run]',
   '  runtime start',
   '  request config-patch --file <file> [--dry-run]',
 ].join('\n')

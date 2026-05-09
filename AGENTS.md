@@ -80,9 +80,12 @@ import { SessionStore } from '@/session/sessionStore'
 
 // 跨包引用：用 workspace 包名
 import { CodexClient, SessionManager } from '@codex-app/core'
+
+// 测试目录可引用：统一用 @e2e/* alias
+import { createTempHome } from '@e2e/helpers'
 ```
 
-禁止出现 `../../` 形式的相对路径。
+禁止出现 `../../` 形式的相对路径。除非文件为脚本运行入口（如 CLI 启动脚本），默认要求所有可引入模块使用 alias 路径。
 
 ## 提交规范
 

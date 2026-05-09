@@ -41,7 +41,7 @@ codex-app capability list
 ### Resolve / Read
 
 ```bash
-codex-app preset show web-only
+codex-app preset show social
 codex-app channel show wechat
 codex-app capability show skills
 codex-app config view
@@ -51,8 +51,8 @@ codex-app config get runtime.gateway.transport
 ### Write
 
 ```bash
-codex-app assemble apply web-only
-codex-app assemble apply custom --channels web,wechat --capabilities skills,tools --dry-run
+codex-app assemble apply social
+codex-app assemble apply custom --channels telegram,wechat --capabilities skills,tools --dry-run
 codex-app runtime start
 ```
 

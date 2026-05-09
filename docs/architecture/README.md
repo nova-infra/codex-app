@@ -6,7 +6,7 @@
 
 - 同仓库模块化
 - 按配置启用
-- `web / wechat / telegram` 都视为 channel plugin
+- 短期聚焦社交软件入口：`telegram / wechat`
 - 主文档只关心总架构和必要模块组合
 - channel 细节单独下沉到 `channels/`
 - CLI 可以基于 preset 与 agent 装配模块
@@ -19,6 +19,10 @@
 - [CLI 架构](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/cli.md)
 - [重构路线图](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/roadmap.md)
 - [Channel 目录](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/channels/README.md)
+- [Channel 消息样式规范](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/channels/message-style.md)
+- [Hermes 返回逻辑深化方案](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/channels/hermes-return-logic-plan.html)
+- [cc-connect 差距记录](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/cc-connect-gap-analysis.md)
+- [Go 重写计划 HTML](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/go-rewrite-plan.html)
 
 ## 规划边界
 
@@ -31,9 +35,9 @@
 ```mermaid
 flowchart TB
     subgraph Channels["Channel Plugins"]
-        WEB["channel-web"]
         WX["channel-wechat"]
         TG["channel-telegram"]
+        LK["channel-lark\nplanned"]
         FUTURE["channel-*"]
     end
 
@@ -63,9 +67,9 @@ flowchart TB
         PRESET["Presets"]
     end
 
-    WEB --> API
     WX --> API
     TG --> API
+    LK -. planned .-> API
     FUTURE --> API
 
     API --> SG
@@ -174,7 +178,7 @@ sequenceDiagram
     participant Preset as Preset Config
     participant Runtime as Runtime Config
 
-    Dev->>CLI: assemble web-only
+    Dev->>CLI: assemble social
     CLI->>Preset: load preset
     CLI->>Agent: combine modules by preset
     Agent-->>CLI: final module plan

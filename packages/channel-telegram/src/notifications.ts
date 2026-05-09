@@ -221,6 +221,7 @@ async function onAgentMessageDelta(threadId: string, params: unknown, ctx: Notif
 }
 
 async function onReasoningSummaryDelta(threadId: string, params: unknown, ctx: NotificationContext): Promise<void> {
+  if (ctx.renderMode === 'hermes') return
   const delta = typeof asRecord(params)?.delta === 'string' ? String(asRecord(params)?.delta) : ''
   await upsertThinkingLine(threadId, delta, ctx)
 }

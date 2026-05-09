@@ -22,7 +22,7 @@ CLI 不是第二套 server，也不是第二套 channel。
 CLI 应该只做三类事：
 
 1. `preset`
-   - 读取 `web-only / wechat-only / full / custom`
+   - 读取 `telegram-only / wechat-only / social / custom`
 2. `assemble`
    - 组合要启用的 channel 与 capability
 3. `doctor`
@@ -32,7 +32,7 @@ CLI 应该只做三类事：
 
 ```mermaid
 flowchart LR
-    INPUT["User Intent\nweb-only / custom request"]
+    INPUT["User Intent\nsocial / custom request"]
     PRESET["Preset Loader"]
     AGENT["Assembly Agent"]
     PLAN["Module Plan"]
@@ -50,9 +50,9 @@ flowchart LR
 
 ```bash
 codex-app preset list
-codex-app preset show web-only
-codex-app assemble apply web-only --dry-run
-codex-app assemble apply custom --channels web,wechat --capabilities skills,tools,mcp --dry-run
+codex-app preset show social
+codex-app assemble apply social --dry-run
+codex-app assemble apply custom --channels telegram,wechat --capabilities skills,tools,mcp --dry-run
 codex-app config view
 codex-app --json doctor
 ```
@@ -77,9 +77,8 @@ agent 不应该做：
 ```json
 {
   "channels": {
-    "web": { "enabled": true },
-    "wechat": { "enabled": false },
-    "telegram": { "enabled": false }
+    "telegram": { "enabled": true },
+    "wechat": { "enabled": true }
   },
   "capabilities": {
     "skills": { "enabled": true },

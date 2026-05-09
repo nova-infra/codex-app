@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hermes 返回逻辑深化与 TG / Weixin / Feishu 修改建议</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --black: #000000;
+      --white: #ffffff;
+      --muted: rgba(0,0,0,.52);
+      --soft: rgba(0,0,0,.08);
+      --line: rgba(0,0,0,.10);
+      --line-subtle: rgba(0,0,0,.06);
+      --green: #0acf83;
+      --purple: #a259ff;
+      --orange: #f24e1e;
+      --coral: #ff7262;
+      --blue: #1abcfe;
+      --surface: #fbfbfb;
+      --surface-2: #f6f6f6;
+      --font-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, -apple-system, "SF Pro Display", Helvetica, Arial, sans-serif;
+      --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--white);
+      color: var(--black);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      font-weight: 340;
+      line-height: 1.64;
+      letter-spacing: 0;
+      font-feature-settings: "kern" 1;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      line-break: strict;
+      word-break: normal;
+      overflow-wrap: anywhere;
+      text-autospace: ideograph-alpha ideograph-numeric;
+    }
+    a { color: var(--black); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    a:hover { opacity: .58; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 228px minmax(0, 1fr);
+      gap: 18px;
+      width: min(1280px, calc(100% - 28px));
+      margin: 0 auto;
+      padding: 14px 0 48px;
+    }
+
+    aside {
+      position: sticky;
+      top: 12px;
+      height: calc(100vh - 24px);
+      overflow: auto;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255,255,255,.92);
+      backdrop-filter: blur(14px);
+    }
+    aside::-webkit-scrollbar { width: 7px; }
+    aside::-webkit-scrollbar-thumb { background: var(--soft); border-radius: 999px; }
+
+    .brand {
+      display: grid;
+      grid-template-columns: 32px 1fr;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 4px 10px;
+      margin-bottom: 6px;
+      border-bottom: 1px solid var(--line-subtle);
+    }
+    .logo {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--black);
+      color: var(--black);
+      font-size: 15px;
+      font-weight: 540;
+    }
+    .brand strong {
+      display: block;
+      color: var(--black);
+      font-size: 13px;
+      font-weight: 540;
+      line-height: 1.25;
+      letter-spacing: -0.01em;
+    }
+    .brand span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      line-height: 1.2;
+    }
+    nav { display: grid; gap: 1px; }
+    nav a {
+      display: block;
+      padding: 6px 8px;
+      border-radius: 999px;
+      color: var(--black);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 400;
+      line-height: 1.32;
+      transition: background .16s, opacity .16s;
+    }
+    nav a:hover { background: var(--soft); opacity: 1; }
+
+    main { min-width: 0; }
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 34px 34px 28px;
+      border-radius: 18px;
+      color: var(--black);
+      background: linear-gradient(180deg, #ffffff 0%, #f7f7f7 100%);
+      border: 1px solid var(--line);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(rgba(0,0,0,.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,0,0,.035) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,.45), transparent 72%);
+      pointer-events: none;
+    }
+    .hero > * { position: relative; z-index: 1; }
+    .eyebrow {
+      display: inline-flex;
+      padding: 4px 10px;
+      border-radius: 50px;
+      background: var(--black);
+      color: var(--white);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 400;
+      letter-spacing: .06em;
+    }
+    h1 {
+      max-width: 850px;
+      margin: 16px 0 10px;
+      color: var(--black);
+      font-size: clamp(34px, 5vw, 58px);
+      font-weight: 450;
+      line-height: 1.12;
+      letter-spacing: -0.035em;
+    }
+    .lead {
+      max-width: 780px;
+      color: rgba(0,0,0,.64);
+      font-size: 16px;
+      line-height: 1.76;
+      margin: 0;
+    }
+
+    .grid4, .grid3, .two-col { display: grid; gap: 8px; }
+    .grid4 { grid-template-columns: repeat(4, minmax(0,1fr)); margin-top: 18px; }
+    .grid3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+    .two-col { grid-template-columns: repeat(2, minmax(0,1fr)); }
+
+    .card {
+      padding: 12px 13px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--white);
+    }
+    .hero .card {
+      background: var(--white);
+      border-color: var(--line);
+      backdrop-filter: none;
+    }
+    .card b {
+      display: block;
+      margin-bottom: 4px;
+      color: inherit;
+      font-size: 14px;
+      font-weight: 540;
+      line-height: 1.35;
+      letter-spacing: -0.01em;
+    }
+    .card small {
+      display: block;
+      color: inherit;
+      opacity: .72;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    section {
+      margin-top: 12px;
+      padding: 20px 22px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--white);
+    }
+    h2 {
+      margin: 0 0 12px;
+      color: var(--black);
+      font-size: 28px;
+      font-weight: 450;
+      line-height: 1.2;
+      letter-spacing: -0.03em;
+    }
+    h3 {
+      margin: 16px 0 6px;
+      color: var(--black);
+      font-size: 18px;
+      font-weight: 540;
+      line-height: 1.32;
+      letter-spacing: -0.01em;
+    }
+    p, li, td { color: rgba(0,0,0,.68); }
+    p {
+      max-width: 78ch;
+      margin: 8px 0;
+      font-size: 14.5px;
+      line-height: 1.72;
+    }
+    ul, ol { padding-left: 1.35em; margin: 8px 0; }
+    li { line-height: 1.68; }
+    li + li { margin-top: 4px; }
+    strong, b { font-weight: 540; }
+
+    .callout {
+      position: relative;
+      padding: 12px 14px 12px 42px;
+      border: 1px dashed var(--black);
+      border-radius: 12px;
+      background: var(--surface);
+      color: rgba(0,0,0,.72);
+      font-size: 14px;
+      line-height: 1.68;
+    }
+    .callout::before {
+      content: "";
+      position: absolute;
+      left: 15px;
+      top: 17px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--black);
+    }
+    .callout strong { color: var(--black); }
+
+    table {
+      width: 100%;
+      margin: 10px 0;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--white);
+      font-size: 13.5px;
+    }
+    th, td {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--line-subtle);
+      border-right: 1px solid var(--line-subtle);
+      text-align: left;
+      vertical-align: top;
+    }
+    th:last-child, td:last-child { border-right: 0; }
+    tr:last-child td { border-bottom: 0; }
+    th {
+      background: var(--surface-2);
+      color: var(--black);
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 400;
+      letter-spacing: .05em;
+    }
+
+    code, pre { font-family: var(--font-mono); }
+    code {
+      padding: 1px 5px;
+      border-radius: 6px;
+      background: var(--soft);
+      color: var(--black);
+      font-size: .88em;
+    }
+    pre {
+      margin: 10px 0;
+      padding: 12px;
+      border-radius: 10px;
+      background: #111;
+      color: var(--white);
+      overflow: auto;
+      line-height: 1.62;
+      font-size: 12.5px;
+    }
+    pre code { padding: 0; background: transparent; color: inherit; }
+
+    .diagram-wrap {
+      margin: 10px 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+      overflow: auto;
+    }
+    .diagram { display: block; min-width: 860px; width: 100%; height: auto; }
+
+    .tag {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 50px;
+      background: var(--black);
+      color: var(--white);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 400;
+      letter-spacing: .05em;
+    }
+    .ok { color: #087a45; }
+    .warn { color: #a15c00; }
+    .bad { color: #d92d20; }
+
+    .step {
+      display: grid;
+      grid-template-columns: 92px minmax(0,1fr);
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid var(--line-subtle);
+    }
+    .step:first-of-type { border-top: 0; padding-top: 0; }
+    .step h3 { margin-top: 0; }
+    .step p { margin-bottom: 0; }
+
+    .footer {
+      padding: 20px 0 0;
+      text-align: center;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    @media (max-width: 980px) {
+      .layout { display: block; width: min(100% - 18px, 820px); padding-top: 9px; }
+      aside { position: relative; top: 0; height: auto; margin-bottom: 10px; }
+      .grid4, .grid3, .two-col { grid-template-columns: 1fr; }
+      .step { grid-template-columns: 1fr; }
+      .hero, section { padding: 18px; }
+      h1 { font-size: clamp(34px, 10vw, 48px); letter-spacing: -0.03em; }
+      h2 { font-size: 24px; }
+      p { max-width: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <div class="brand"><div class="logo">H</div><div><strong>Hermes 返回逻辑</strong><span>TG / Weixin / Feishu 修改建议</span></div></div>
+      <nav>
+        <a href="#summary">01 结论</a>
+        <a href="#hermes-model">02 Hermes 模型</a>
+        <a href="#pipeline">03 事件流水线</a>
+        <a href="#profiles">04 平台 Profile</a>
+        <a href="#telegram">05 Telegram 怎么改</a>
+        <a href="#weixin">06 Weixin 怎么改</a>
+        <a href="#feishu">07 Feishu/Lark 怎么改</a>
+        <a href="#go-target">08 Go 重写落点</a>
+        <a href="#migration">09 迁移顺序</a>
+        <a href="#acceptance">10 验收</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="hero">
+        <h1>深化 Hermes 返回逻辑</h1>
+        <p class="lead">本方案把 <code>/Users/Bigo/Desktop/develop/ai/hermes-agent</code> 的 Gateway 展示策略整理成 codex-app 的 channel renderer 规范：统一隐藏 reasoning、按平台能力选择 tool progress、流式编辑、卡片、纯文本降级和媒体回传。</p>
+        <div class="grid4">
+          <div class="card"><b>核心原则</b><small>最终回答与工具进度分层，不让内部过程污染正文。</small></div>
+          <div class="card"><b>TG</b><small>high tier：可展示完整进度，但必须编辑复用。</small></div>
+          <div class="card"><b>Weixin</b><small>low tier：不刷进度，只发最终纯文本和必要附件。</small></div>
+          <div class="card"><b>Feishu/Lark</b><small>medium tier：卡片优先，只显示新阶段，失败文本 fallback。</small></div>
+        </div>
+      </header>
+
+      <section id="summary">
+        <h2>01. 结论</h2>
+        <div class="callout"><strong>建议不要在 TG / Weixin / Feishu 各自硬写返回格式。</strong> 应抽一个 Hermes-style renderer：core 产生统一事件，renderer 根据平台 profile 决定哪些事件可见、如何合并、如何编辑、如何 fallback。</div>
+        <table>
+          <thead><tr><th>问题</th><th>现状</th><th>目标</th></tr></thead>
+          <tbody>
+            <tr><td>reasoning 泄漏</td><td>TG/Weixin 代码里仍有 thinking 状态和 reasoning delta 路径。</td><td>默认全部隐藏；只保留显式 debug 开关。</td></tr>
+            <tr><td>工具进度噪音</td><td>Weixin 会把 item/started 发成永久文本；TG 也存在进度与最终答案顺序问题。</td><td>TG 编辑同一条；Weixin 默认不发；Feishu 只发新阶段。</td></tr>
+            <tr><td>流式与工具交错</td><td>文本 delta、tool started、final answer 容易乱序。</td><td>工具边界强制分段：progress bubble 在上，final answer 在下。</td></tr>
+            <tr><td>媒体标记外泄</td><td>图片/文件内部字段可能被当文本处理。</td><td><code>MEDIA:</code>、音频占位、内部 JSON 全部在 renderer 前剥离，附件走 channel capability。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="hermes-model">
+        <h2>02. Hermes 返回模型</h2>
+        <p>Hermes 的关键不是 UI 好看，而是把“用户该看到什么”变成平台能力的函数。参考点：</p>
+        <ul>
+          <li><code>gateway/display_config.py</code>：按平台解析 <code>tool_progress / show_reasoning / streaming / cleanup_progress</code>。</li>
+          <li><code>gateway/stream_consumer.py</code>：流式编辑、工具边界分段、thinking 标签过滤、长文本拆分。</li>
+          <li><code>gateway/platforms/helpers.py</code>：文本批处理、Markdown 降级、去重。</li>
+          <li><code>gateway/platforms/feishu.py</code>：卡片/富文本 fallback、反应状态、审批按钮。</li>
+        </ul>
+        <div class="diagram-wrap">
+          <svg class="diagram" viewBox="0 0 1160 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Hermes return logic pipeline">
+            <defs>
+              <linearGradient id="hg" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#a78bfa"/></linearGradient>
+              <marker id="arr" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M2,2 L10,6 L2,10 Z" fill="#7dd3fc"/></marker>
+              <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-opacity=".28"/></filter>
+            </defs>
+            <rect x="20" y="20" width="1120" height="430" rx="24" fill="#020617" opacity=".42"/>
+            <g filter="url(#sh)">
+              <rect x="60" y="110" width="170" height="92" rx="18" fill="#0f172a" stroke="#334155"/>
+              <text x="145" y="145" text-anchor="middle" fill="#fff" font-size="18" font-weight="800">Codex Events</text>
+              <text x="145" y="174" text-anchor="middle" fill="#94a3b8" font-size="13">delta / tool / final</text>
+              <rect x="300" y="86" width="210" height="140" rx="20" fill="#111827" stroke="#38bdf8"/>
+              <text x="405" y="122" text-anchor="middle" fill="#fff" font-size="18" font-weight="800">Normalizer</text>
+              <text x="405" y="153" text-anchor="middle" fill="#cbd5e1" font-size="13">filter reasoning</text>
+              <text x="405" y="178" text-anchor="middle" fill="#cbd5e1" font-size="13">extract media</text>
+              <text x="405" y="203" text-anchor="middle" fill="#cbd5e1" font-size="13">dedupe / batch</text>
+              <rect x="580" y="86" width="210" height="140" rx="20" fill="#111827" stroke="#a78bfa"/>
+              <text x="685" y="122" text-anchor="middle" fill="#fff" font-size="18" font-weight="800">Display Profile</text>
+              <text x="685" y="153" text-anchor="middle" fill="#cbd5e1" font-size="13">high / medium / low</text>
+              <text x="685" y="178" text-anchor="middle" fill="#cbd5e1" font-size="13">progress policy</text>
+              <text x="685" y="203" text-anchor="middle" fill="#cbd5e1" font-size="13">stream/edit policy</text>
+              <rect x="860" y="86" width="220" height="140" rx="20" fill="url(#hg)" opacity=".88"/>
+              <text x="970" y="122" text-anchor="middle" fill="#020617" font-size="18" font-weight="900">Channel Renderer</text>
+              <text x="970" y="153" text-anchor="middle" fill="#082f49" font-size="13" font-weight="700">TG HTML / Weixin plain</text>
+              <text x="970" y="178" text-anchor="middle" fill="#082f49" font-size="13" font-weight="700">Feishu card / fallback</text>
+              <text x="970" y="203" text-anchor="middle" fill="#082f49" font-size="13" font-weight="700">attachment delivery</text>
+            </g>
+            <path d="M230 156 L300 156" stroke="#7dd3fc" stroke-width="3" marker-end="url(#arr)"/>
+            <path d="M510 156 L580 156" stroke="#7dd3fc" stroke-width="3" marker-end="url(#arr)"/>
+            <path d="M790 156 L860 156" stroke="#7dd3fc" stroke-width="3" marker-end="url(#arr)"/>
+            <g>
+              <rect x="180" y="292" width="800" height="78" rx="18" fill="#0f172a" stroke="#334155"/>
+              <text x="580" y="324" text-anchor="middle" fill="#e5e7eb" font-size="16" font-weight="800">关键约束</text>
+              <text x="580" y="350" text-anchor="middle" fill="#94a3b8" font-size="13">thinking 不外泄 · tool 与 answer 分层 · 支持编辑则编辑 · 不支持编辑则少发 · 媒体走附件能力</text>
+            </g>
+          </svg>
+        </div>
+      </section>
+
+      <section id="pipeline">
+        <h2>03. 事件流水线应该这样改</h2>
+        <div class="step"><div><span class="tag">Step 1</span></div><div><h3>统一事件归一</h3><p>先在 core 层把 Codex 事件归一为 <code>assistant.delta</code>、<code>tool.started</code>、<code>tool.completed</code>、<code>approval.requested</code>、<code>turn.completed</code>、<code>error</code>。平台层不要直接判断 Codex 原始 method。</p></div></div>
+        <div class="step"><div><span class="tag">Step 2</span></div><div><h3>默认过滤 reasoning</h3><p>所有 <code>reasoning</code> item、<code>summaryTextDelta</code>、<code>&lt;think&gt;</code> 标签在 renderer 前被过滤。只有显式 <code>display.show_reasoning = true</code> 才允许展示。</p></div></div>
+        <div class="step"><div><span class="tag">Step 3</span></div><div><h3>工具边界分段</h3><p>收到 tool started/completed 后，当前 assistant stream 要结束当前段，后续正文必须新开消息或新内容块，避免“答案写到工具进度上方”。</p></div></div>
+        <div class="step"><div><span class="tag">Step 4</span></div><div><h3>媒体剥离</h3><p>在文本渲染前扫描 <code>MEDIA:</code>、图片 URL、文件路径、音频占位；附件走 <code>ImageSender/FileSender</code>，正文只保留必要说明。</p></div></div>
+        <div class="step"><div><span class="tag">Step 5</span></div><div><h3>平台 profile 决策</h3><p>renderer 根据 <code>toolProgress</code>、<code>streaming</code>、<code>messageUpdate</code>、<code>card</code>、<code>plainText</code> 决定最终展示方式。</p></div></div>
+      </section>
+
+      <section id="profiles">
+        <h2>04. 平台 Display Profile</h2>
+        <pre><code>type DisplayProfile struct {
+    ToolProgress      string // all | new | off
+    ShowReasoning     bool
+    Streaming         bool
+    MessageUpdate     bool
+    ToolPreviewLength int
+    CleanupProgress   bool
+    Format            string // html | markdown | card | plain
+}</code></pre>
+        <table>
+          <thead><tr><th>平台</th><th>Profile</th><th>默认策略</th><th>原因</th></tr></thead>
+          <tbody>
+            <tr><td>Telegram</td><td><code>high</code></td><td><code>toolProgress=all</code>、<code>streaming=true</code>、<code>messageUpdate=true</code>、<code>format=html</code></td><td>支持 editMessageText 和 inline keyboard，适合展示完整过程。</td></tr>
+            <tr><td>Weixin</td><td><code>low</code></td><td><code>toolProgress=off</code>、<code>streaming=false</code>、<code>messageUpdate=false</code>、<code>format=plain</code></td><td>iLink 文本消息是永久消息，刷进度会污染聊天。</td></tr>
+            <tr><td>Feishu/Lark</td><td><code>medium</code></td><td><code>toolProgress=new</code>、<code>streaming=true</code>、<code>messageUpdate=true</code>、<code>format=card</code></td><td>团队群聊需要少噪音，卡片能承载状态和审批。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="telegram">
+        <h2>05. Telegram 应该如何修改</h2>
+        <div class="two-col">
+          <div class="card"><b>当前要收敛的问题</b><small>仍存在 classic/hermes 双模式、thinking map、progress/final 顺序处理分散在 adapter/notifications/streamEditor。</small></div>
+          <div class="card"><b>目标</b><small>TG 平台只负责 Bot API、HTML 降级、inline button、message update；显示策略来自 DisplayProfile。</small></div>
+        </div>
+        <h3>修改建议</h3>
+        <ol>
+          <li>删除默认 classic 分支，默认只保留 Hermes-style；classic 如要保留只能作为 debug profile。</li>
+          <li><code>item/reasoning/summaryTextDelta</code> 默认直接丢弃，移除用户可见 thinking line。</li>
+          <li>tool progress 只维护一条 progress message，收到新 tool 时编辑同一条；不要每个工具发新消息。</li>
+          <li>tool boundary 后调用 stream segment break，让最终答案在 progress 后作为新消息出现。</li>
+          <li>最终答案使用 HTML 优先；失败 fallback plain text；长文本按 Telegram 限制拆分。</li>
+          <li>approval 继续使用 inline keyboard，但文案走统一 approval renderer。</li>
+          <li>可选支持 <code>cleanupProgress=true</code>：成功后删除或折叠进度，失败保留错误线索。</li>
+        </ol>
+        <h3>用户观感</h3>
+        <pre><code>⚙️ bun run ...
+✓ 修改 docs/architecture/...
+
+已完成。关键变更如下：
+1. ...
+2. ...</code></pre>
+        <p class="bad">不要出现：<code>&lt;think&gt;</code>、<code>Thinking...</code>、连续 10 条工具状态、最终回答插在工具消息上方。</p>
+      </section>
+
+      <section id="weixin">
+        <h2>06. Weixin 应该如何修改</h2>
+        <div class="two-col">
+          <div class="card"><b>当前要收敛的问题</b><small>Weixin 目前会处理 <code>item/started</code> 并调用 <code>sendProgress</code>，还会 append thinking；这与 Hermes low tier 不一致。</small></div>
+          <div class="card"><b>目标</b><small>Weixin 只做 typing、最终纯文本、数字审批、图片/文件 relay；不展示工具进度和 reasoning。</small></div>
+        </div>
+        <h3>修改建议</h3>
+        <ol>
+          <li><code>item/started</code> 对非图片类工具默认不发送任何文本；只保留内部状态或日志。</li>
+          <li><code>item/reasoning/summaryTextDelta</code> 默认丢弃，删除 <code>thinkingByChatId</code> 用户可见路径。</li>
+          <li>保留 typing indicator，作为“正在处理”的唯一实时反馈。</li>
+          <li>最终回复调用 Markdown-to-plain formatter，保留代码缩进、链接语义和段落。</li>
+          <li>长文本分块时第一条可以加摘要，但不要发“详细内容”这类固定话术噪音过多。</li>
+          <li>图片生成/查看结果只走图片 relay；正文不暴露内部 URL / JSON / CDN 字段。</li>
+          <li>approval 保持数字菜单：<code>回复 1 确认，2 拒绝</code>。</li>
+        </ol>
+        <h3>用户观感</h3>
+        <pre><code>已完成。关键变更如下：
+1. 新增 Go 重写计划 HTML。
+2. 补充 Hermes 返回逻辑。
+3. 保留后续迁移验收口径。</code></pre>
+        <p class="bad">不要出现：<code>⚙️ 执行命令...</code>、<code>🧰 调用工具...</code>、<code>🧠 Thinking...</code> 这类永久刷屏消息。</p>
+      </section>
+
+      <section id="feishu">
+        <h2>07. Feishu / Lark 应该如何修改</h2>
+        <div class="two-col">
+          <div class="card"><b>当前状态</b><small>codex-app 里 Feishu/Lark 仍是规划项；Go 重写时应直接按 Hermes medium tier 落地，不走 TG/Weixin 的旧逻辑。</small></div>
+          <div class="card"><b>目标</b><small>卡片优先、文本 fallback、只显示新阶段、隐藏 reasoning、群聊保持 reply/thread 上下文。</small></div>
+        </div>
+        <h3>修改建议</h3>
+        <ol>
+          <li>新增 <code>platform/feishu</code>，复用 cc-connect 的 card、ws_shared、preview cleaner 设计。</li>
+          <li>tool progress 使用 <code>new</code>：同类重复工具不刷，只在阶段变化时更新卡片。</li>
+          <li>进度卡片可编辑则编辑；编辑失败再发一条 fallback 文本，不能持续新增卡片。</li>
+          <li>approval 使用交互卡片按钮：确认 / 拒绝；卡片失败 fallback 为文本按钮说明。</li>
+          <li>群聊中必须解析 @ 机器人；私聊直接触发。</li>
+          <li>保留 thread/reply metadata，但不要把 Feishu thread 结构泄漏到 core。</li>
+          <li>用 reaction 或 card 状态表达“处理中/失败”；成功不强制发额外 success 噪音。</li>
+        </ol>
+        <h3>用户观感</h3>
+        <pre><code>[卡片]
+状态：处理中
+阶段：读取仓库结构
+操作：确认 / 拒绝
+
+[最终文本]
+已完成。关键结论如下：...</code></pre>
+      </section>
+
+      <section id="go-target">
+        <h2>08. Go 重写时的落点</h2>
+        <table>
+          <thead><tr><th>Go 文件</th><th>职责</th><th>迁移来源</th></tr></thead>
+          <tbody>
+            <tr><td><code>core/render_profile.go</code></td><td>定义 high/medium/low/minimal profile 和 per-platform override。</td><td><code>hermes-agent/gateway/display_config.py</code></td></tr>
+            <tr><td><code>core/render_pipeline.go</code></td><td>统一过滤 reasoning、提取媒体、分段、批处理、长文本拆分。</td><td><code>stream_consumer.py</code>、<code>helpers.py</code></td></tr>
+            <tr><td><code>core/render_event.go</code></td><td>把 Codex raw event 转成稳定 render event。</td><td>当前 <code>EventPipeline</code> + cc-connect engine 思路</td></tr>
+            <tr><td><code>platform/telegram/renderer.go</code></td><td>TG HTML、inline keyboard、editMessageText、photo/file。</td><td>cc-connect telegram + 当前 TS sender/format</td></tr>
+            <tr><td><code>platform/weixin/renderer.go</code></td><td>纯文本、数字审批、iLink 分块、图片 relay。</td><td>cc-connect weixin + 当前 TS textFormat</td></tr>
+            <tr><td><code>platform/feishu/renderer.go</code></td><td>卡片、按钮、fallback、preview cleaner。</td><td>cc-connect feishu + Hermes feishu adapter</td></tr>
+          </tbody>
+        </table>
+        <pre><code>type RenderEvent struct {
+    Kind      string // text_delta | tool_start | tool_done | approval | final | error | media
+    ThreadID  string
+    Text      string
+    ToolName  string
+    Media     []MediaAttachment
+    Approval  *ApprovalRequest
+}
+
+type ChannelRenderer interface {
+    Render(ctx context.Context, target ReplyTarget, event RenderEvent) error
+    Finalize(ctx context.Context, target ReplyTarget, final FinalMessage) error
+}</code></pre>
+      </section>
+
+      <section id="migration">
+        <h2>09. 迁移顺序</h2>
+        <div class="step"><div><span class="tag">P0</span></div><div><h3>先抽 renderer profile</h3><p>先在 Go core 定义 profile，不急着接三个平台。profile 是后续一致性的根。</p></div></div>
+        <div class="step"><div><span class="tag">P1</span></div><div><h3>Telegram 先落地</h3><p>因为 TG 支持 edit 和 inline keyboard，最适合作为完整 renderer 的第一条端到端样板。</p></div></div>
+        <div class="step"><div><span class="tag">P2</span></div><div><h3>Weixin 只做低噪音</h3><p>迁 Weixin 时不要复制 TG 进度逻辑，直接按 low tier：typing + final + approval + media。</p></div></div>
+        <div class="step"><div><span class="tag">P3</span></div><div><h3>Feishu/Lark 做卡片策略</h3><p>最后接 Feishu/Lark，重点做卡片 fallback 和群聊 thread/reply 上下文。</p></div></div>
+      </section>
+
+      <section id="acceptance">
+        <h2>10. 验收口径</h2>
+        <table>
+          <thead><tr><th>验收项</th><th>通过标准</th></tr></thead>
+          <tbody>
+            <tr><td>reasoning 默认隐藏</td><td>三端真实消息中不出现 thinking 标签、reasoning summary、scratchpad。</td></tr>
+            <tr><td>TG 高信息密度</td><td>能看到必要工具进度，但通过编辑复用，不刷屏。</td></tr>
+            <tr><td>Weixin 低噪音</td><td>工具执行期间只有 typing；完成后只发最终回复和必要附件。</td></tr>
+            <tr><td>Feishu 卡片 fallback</td><td>卡片可用时卡片展示；卡片失败时文本仍可完成审批和最终回复。</td></tr>
+            <tr><td>媒体不外泄</td><td>用户看不到 <code>MEDIA:</code>、内部 URL JSON、临时文件路径。</td></tr>
+            <tr><td>顺序稳定</td><td>tool progress 永远在最终答案之前，最终答案不被插入到工具消息中间。</td></tr>
+          </tbody>
+        </table>
+        <div class="callout"><strong>执行提醒：</strong>这份文档是修改建议，不是代码实现。后续真正实现时应先按 Go 重写计划落 core renderer，再接 TG / Weixin / Feishu。</div>
+      </section>
+
+      <div class="footer">Self-contained HTML artifact · channel rendering architecture · codex-app</div>
+    </main>
+  </div>
+</body>
+</html>

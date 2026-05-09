@@ -85,8 +85,10 @@ export type AppConfig = {
 function defaultChannels(): ChannelConfigMap {
   const defaults = Object.fromEntries(listChannels().map(channel => [channel.key, channel.defaultEnabled])) as Record<ChannelKey, boolean>
   return {
-    web: { enabled: defaults.web, transport: 'ws' },
-    telegram: { enabled: defaults.telegram, botToken: '', renderMode: 'classic' },
+    // WebSocket proxy is kept as a legacy/debug endpoint, but it is no longer a
+    // default channel while the mainline focuses on social software channels.
+    web: { enabled: false, transport: 'ws' },
+    telegram: { enabled: defaults.telegram, botToken: '', renderMode: 'hermes' },
     wechat: { enabled: defaults.wechat },
   }
 }
@@ -145,8 +147,11 @@ export async function loadConfig(): Promise<AppConfig> {
 
   const raw = await readFile(appPaths.config, 'utf-8')
   const parsed = JSON.parse(raw) as Partial<AppConfig>
-  const telegram = parsed.channels?.telegram
-    ?? (parsed.telegram ? { enabled: true, botToken: parsed.telegram.botToken, renderMode: parsed.telegram.renderMode ?? 'classic' } : undefined)
+  const rawTelegram = parsed.channels?.telegram
+    ?? (parsed.telegram ? { enabled: true, botToken: parsed.telegram.botToken, renderMode: parsed.telegram.renderMode } : undefined)
+  const telegram = rawTelegram
+    ? { ...rawTelegram, renderMode: rawTelegram.renderMode ?? 'hermes' }
+    : undefined
   const wechat = parsed.channels?.wechat
     ?? (parsed.wechat ? { enabled: parsed.wechat.enabled } : undefined)
 

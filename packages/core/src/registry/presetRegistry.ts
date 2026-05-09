@@ -1,7 +1,7 @@
 import type { ChannelKey } from '@/registry/channelRegistry'
 import type { CapabilityKey } from '@/registry/capabilityRegistry'
 
-export type PresetKey = 'minimal' | 'web-only' | 'wechat-only' | 'full'
+export type PresetKey = 'minimal' | 'telegram-only' | 'wechat-only' | 'social'
 
 export type PresetDefinition = {
   readonly key: PresetKey
@@ -14,7 +14,7 @@ const PRESETS: readonly PresetDefinition[] = [
   {
     key: 'minimal',
     description: 'Core runtime only for gateway and contract debugging.',
-    channels: { web: false, telegram: false, wechat: false },
+    channels: { telegram: false, wechat: false },
     capabilities: {
       skills: false,
       tools: false,
@@ -26,13 +26,13 @@ const PRESETS: readonly PresetDefinition[] = [
     },
   },
   {
-    key: 'web-only',
-    description: 'Default mainline preset focused on web parity.',
-    channels: { web: true, telegram: false, wechat: false },
+    key: 'telegram-only',
+    description: 'Telegram-focused preset with storage and notifications enabled.',
+    channels: { telegram: true, wechat: false },
     capabilities: {
       skills: true,
       tools: true,
-      mcp: true,
+      mcp: false,
       'provider-profiles': true,
       'storage-adapter': true,
       'image-relay': false,
@@ -42,7 +42,7 @@ const PRESETS: readonly PresetDefinition[] = [
   {
     key: 'wechat-only',
     description: 'WeChat-focused preset with image relay and storage enabled.',
-    channels: { web: false, telegram: false, wechat: true },
+    channels: { telegram: false, wechat: true },
     capabilities: {
       skills: true,
       tools: true,
@@ -54,9 +54,9 @@ const PRESETS: readonly PresetDefinition[] = [
     },
   },
   {
-    key: 'full',
-    description: 'Web + Telegram + WeChat with all supported capabilities.',
-    channels: { web: true, telegram: true, wechat: true },
+    key: 'social',
+    description: 'Telegram + WeChat social channels with all supported social capabilities.',
+    channels: { telegram: true, wechat: true },
     capabilities: {
       skills: true,
       tools: true,

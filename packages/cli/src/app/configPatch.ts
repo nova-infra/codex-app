@@ -43,15 +43,6 @@ function redactSecretValue(value: unknown): unknown {
 }
 
 function setChannelEnabled(config: AppConfig, key: ChannelKey, enabled: boolean): AppConfig {
-  if (key === 'web') {
-    return {
-      ...config,
-      channels: {
-        ...config.channels,
-        web: { ...config.channels.web, enabled },
-      },
-    }
-  }
   if (key === 'telegram') {
     return {
       ...config,

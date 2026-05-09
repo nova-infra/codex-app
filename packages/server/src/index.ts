@@ -118,7 +118,9 @@ const server = Bun.serve<WsData>({
 })
 
 console.log(`[codex-app] Ready at http://localhost:${server.port}`)
-console.log(`[codex-app] WebSocket: ws://localhost:${server.port}/ws?token=<your-token>`)
+if (config.channels.web.enabled) {
+  console.log(`[codex-app] Legacy WebSocket: ws://localhost:${server.port}/ws?token=<your-token>`)
+}
 
 // Start channel adapters (if configured)
 await startChannels(config)

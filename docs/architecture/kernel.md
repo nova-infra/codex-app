@@ -39,11 +39,11 @@ flowchart TB
 
 ### 1. Channel 不拥有 session 真相
 
-`channel-web`、`channel-wechat`、`channel-telegram` 只能持有当前输入上下文，不能各自演化出一套 session 规则。
+`channel-wechat`、`channel-telegram` 等社交入口只能持有当前输入上下文，不能各自演化出一套 session 规则。
 
 ### 2. Kernel 不拥有 channel UX
 
-approval 在 kernel 里是统一事件；到底是 web modal、telegram keyboard、还是微信数字菜单，由 channel 自己渲染。
+approval 在 kernel 里是统一事件；到底是 Telegram keyboard、微信数字菜单，还是其他社交软件交互，由 channel 自己渲染。
 
 ### 3. Kernel 只认统一事件
 

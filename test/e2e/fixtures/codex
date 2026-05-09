@@ -1,0 +1,148 @@
+#!/usr/bin/env bun
+
+function parseArg(name: string): string | null {
+  const index = process.argv.indexOf(name)
+  return index >= 0 && process.argv[index + 1]
+    ? process.argv[index + 1]
+    : null
+}
+
+const listenTarget = parseArg('--listen') ?? 'ws://127.0.0.1:8766'
+const match = listenTarget.match(/:(\d+)(?:\/|$)/)
+const listenPort = Number(match?.[1] ?? 8766)
+
+const threads = new Map<string, { cwd: string }>()
+let nextThread = 1
+let nextUpdateId = 1
+
+function nextThreadId(): string {
+  const id = `thread-${nextThread}`
+  nextThread += 1
+  return id
+}
+
+function respond(ws: WebSocket, payload: Record<string, unknown>): void {
+  ws.send(JSON.stringify(payload))
+}
+
+function withThread(params: unknown): string {
+  const p = params as { threadId?: string; thread?: { id?: string }; cwd?: string } | undefined
+  const thread = p?.thread?.id
+  const threadId = p?.threadId ?? thread
+  return typeof threadId === 'string' ? threadId : nextThreadId()
+}
+
+const server = Bun.serve({
+  port: listenPort,
+  fetch(req, server) {
+    if (server.upgrade(req)) return undefined as unknown as Response
+    return new Response('not found', { status: 404 })
+  },
+  websocket: {
+    message(ws, raw) {
+      const data = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer)
+      const message = JSON.parse(data) as {
+        id?: number
+        method?: string
+        params?: Record<string, unknown>
+      }
+      if (!message.method) return
+
+      const id = message.id
+      const method = message.method
+      const params = message.params ?? {}
+
+      const emit = (payload: Record<string, unknown>) => respond(ws, payload)
+      if (id !== undefined) {
+        if (method === 'initialize') {
+          emit({ jsonrpc: '2.0', id, result: { ok: true, protocolVersion: '1.0' } })
+          return
+        }
+        if (method === 'thread/start') {
+          const threadId = withThread(params)
+          const cwd = typeof params.cwd === 'string' ? params.cwd : process.cwd()
+          threads.set(threadId, { cwd })
+          emit({ jsonrpc: '2.0', id, result: { threadId } })
+          return
+        }
+        if (method === 'thread/list') {
+          const data = [...threads.entries()].map(([sessionId, meta]) => ({
+            id: sessionId,
+            name: `session-${sessionId}`,
+            cwd: meta.cwd,
+          }))
+          emit({ jsonrpc: '2.0', id, result: { data } })
+          return
+        }
+        if (method === 'thread/read') {
+          const threadId = withThread(params)
+          emit({ jsonrpc: '2.0', id, result: { thread: { id: threadId, cwd: threads.get(threadId)?.cwd ?? process.cwd() } } })
+          return
+        }
+        if (method === 'thread/resume') {
+          emit({ jsonrpc: '2.0', id, result: { ok: true, threadId: withThread(params) } })
+          return
+        }
+        if (method === 'thread/archive' || method === 'thread/compact/start' || method.startsWith('turn/')) {
+          const threadId = method.startsWith('turn/') ? withThread(params) : withThread(params)
+          if (method === 'turn/start') {
+            const requestId = nextUpdateId
+            nextUpdateId += 1
+            setTimeout(() => {
+              emit({
+                jsonrpc: '2.0',
+                method: 'item/started',
+                params: {
+                  id: requestId,
+                  thread: { id: threadId },
+                  item: { type: 'tool' },
+                },
+              })
+            }, 20)
+
+            setTimeout(() => {
+              emit({
+                jsonrpc: '2.0',
+                method: 'turn/completed',
+                params: {
+                  id: requestId,
+                  thread: { id: threadId },
+                  turn: { id: `turn-${requestId}` },
+                  tokenUsage: { used: 9, total: 10 },
+                },
+              })
+            }, 40)
+          }
+          emit({ jsonrpc: '2.0', id, result: { ok: true, method } })
+          return
+        }
+        if (method === 'model/list') {
+          emit({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              data: [
+                { id: 'gpt-4o-mini' },
+                { id: 'o3-mini' },
+              ],
+            },
+          })
+          return
+        }
+
+        emit({ jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } })
+        return
+      }
+
+      if (method === 'initialized' || method === 'notifications/initialized') {
+        return
+      }
+    },
+    close() {},
+    open(ws) {
+      console.log(`[fake-codex] client connected`)
+    },
+  },
+})
+
+console.log(`listening on ws://127.0.0.1:${listenPort}`)

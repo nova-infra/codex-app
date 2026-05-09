@@ -1,4 +1,4 @@
-export type ChannelKey = 'web' | 'telegram' | 'wechat'
+export type ChannelKey = 'telegram' | 'wechat'
 
 export type ChannelMeta = {
   readonly key: ChannelKey
@@ -9,13 +9,6 @@ export type ChannelMeta = {
 }
 
 const CHANNELS: readonly ChannelMeta[] = [
-  {
-    key: 'web',
-    label: 'Web',
-    description: 'WebSocket gateway that maps one web session to one Codex thread.',
-    defaultEnabled: true,
-    requiredCapabilities: ['skills', 'tools', 'mcp', 'provider-profiles', 'storage-adapter', 'notification-adapter'],
-  },
   {
     key: 'telegram',
     label: 'Telegram',
