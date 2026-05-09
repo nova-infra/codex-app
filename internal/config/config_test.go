@@ -20,6 +20,17 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigRuntimeCompatibility(t *testing.T) {
+	cfg := Default()
+	rt := DefaultRuntime()
+	if cfg.DefaultChannel != rt.DefaultChannel {
+		t.Fatalf("config default channel mismatch: %q != %q", cfg.DefaultChannel, rt.DefaultChannel)
+	}
+	if len(cfg.EnabledChannels) != len(rt.EnabledChannels) {
+		t.Fatalf("config enabled channels length mismatch: %d != %d", len(cfg.EnabledChannels), len(rt.EnabledChannels))
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	cfg := Default()
 	if err := cfg.Validate(); err != nil {
