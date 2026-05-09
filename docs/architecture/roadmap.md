@@ -7,7 +7,7 @@
 ## 目标
 
 - 保留同仓库模块化，不做运行时外部插件系统
-- `wechat / telegram / cli` 进入当前实现范围；`feishu / lark` 进入规划范围；Web channel 暂时冻结
+- `wechat / telegram / cli` 进入当前实现范围；`feishu / lark` 已进入最小真实链路，后续继续补齐高级能力；Web channel 暂时冻结
 - `rn` 短期冻结，不进入当前重构主线
 - 内核只保留稳定 contract、session、event、approval、codex transport
 - `skill / tool / mcp / provider / storage` 全部进入 capability registry
@@ -31,7 +31,7 @@
 
 ### 2. 社交软件入口优先
 
-短期不推进 Web channel，优先把 Telegram / 微信等社交软件入口的 contract、session、approval 与事件渲染收敛稳定；Feishu / Lark 作为下一批社交 channel 规划项。
+短期不推进 Web channel，优先把 Telegram / 微信等社交软件入口的 contract、session、approval 与事件渲染收敛稳定；Feishu / Lark 已进入最小真实链路，继续按 channel contract 收敛高级能力。
 
 ### 3. Channel 只做适配，不做真相源
 
@@ -58,7 +58,7 @@ channel 只能处理输入输出与交互差异，不能私自拥有 session、a
 
 - `channel-wechat`
 - `channel-telegram`
-- `channel-lark` / `channel-feishu`（规划，暂不实现）
+- `channel-lark` / `channel-feishu`（最小真实链路已实现，继续演进）
 - `image-relay`
 - `notification-adapter`
 - `account-source`
@@ -95,8 +95,8 @@ channel 只能处理输入输出与交互差异，不能私自拥有 session、a
 
 涉及模块：
 
-- `packages/core`
-- `packages/server`
+- `internal/runtime 与 internal/config`
+- `internal/server`
 
 完成标准：
 
@@ -113,8 +113,8 @@ channel 只能处理输入输出与交互差异，不能私自拥有 session、a
 
 涉及模块：
 
-- `packages/core`
-- 新增 `packages/capabilities-*` 或同级目录
+- `internal/runtime 与 internal/config`
+- 新增 `internal/capability-*` 或同级目录
 
 完成标准：
 
@@ -125,14 +125,14 @@ channel 只能处理输入输出与交互差异，不能私自拥有 session、a
 
 目标：
 
-- `wechat / telegram` 先走统一 channel 接口，`feishu / lark` 在 contract 稳定后接入，Web 暂时不进入主线
+- `wechat / telegram / feishu / lark` 先走统一 channel 接口，Web 暂时不进入主线
 - CLI 能按 preset 装配 channel 与 capability
 
 涉及模块：
 
-- `packages/channel-*`
+- `internal/channel/*`
 - `apps/*`
-- `packages/server`
+- `internal/server`
 
 完成标准：
 
@@ -149,7 +149,7 @@ channel 只能处理输入输出与交互差异，不能私自拥有 session、a
 
 涉及模块：
 
-- `packages/core`
+- `internal/runtime 与 internal/config`
 
 完成标准：
 

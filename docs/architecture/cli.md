@@ -7,13 +7,13 @@
 ## 定位
 
 - 二进制名：`codex-app`
-- 实现语言：`Go`（主线）；Bun/TS 保留为 legacy 兼容入口
+- 实现语言：`Go`
 - 角色：本地装配器、检查器、配置读写入口
 - 非目标：不复制一套 server，不接管 channel 运行时，不绕过 kernel contract
 
 ## 为什么用 Go（主线）
 
-当前仓库已进入 Go 重写主线。Bun/TS 仍保留做历史对照与迁移参考，不作为默认开发入口。
+当前仓库已进入 Go-only 主线。
 
 Go 的优势包括：
 
@@ -28,7 +28,7 @@ Go 的优势包括：
 - `go run ./cmd/codex-app doctor`
 - `go run ./cmd/codex-app serve --dry-run`
 
-Bun/TS 入口保留为 legacy，仅作历史兼容，不作为默认路径。
+旧脚本入口已移除，默认只保留 Go CLI。
 
 CLI 第一批只做这些可复用任务：
 
@@ -249,7 +249,7 @@ go run ./cmd/codex-app capabilities list --channel all
 go run ./cmd/codex-app render-demo --channel all --json
 ```
 
-其中 Bun 入口（如 `legacy:cli` / `legacy:dev`）仅作为参考，默认不再作为开发主入口。
+默认开发主入口为 `go run ./cmd/codex-app`。
 
 ## 配置优先级
 
@@ -273,35 +273,9 @@ go run ./cmd/codex-app render-demo --channel all --json
 推荐新增独立包：
 
 ```text
-packages/cli/
-  src/
-    main.ts
-    app/
-      commandRegistry.ts
-      context.ts
-    commands/
-      doctor.ts
-      init.ts
-      preset.ts
-      channel.ts
-      capability.ts
-      config.ts
-      assemble.ts
-      runtime.ts
-      request.ts
-    services/
-      doctorService.ts
-      presetRegistry.ts
-      moduleRegistry.ts
-      configService.ts
-      runtimeService.ts
-    output/
-      json.ts
-      text.ts
-    schemas/
-      cliConfig.ts
-      cliResult.ts
-```
+cmd/codex-app/
+internal/command/
+internal/runtime/
 
 ## 依赖边界
 

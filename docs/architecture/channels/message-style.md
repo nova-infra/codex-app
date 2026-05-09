@@ -70,7 +70,7 @@ Telegram 采用 Hermes high tier：
 推荐用户观感：
 
 ```text
-⚙️ bun run ...
+⚙️ go run ./cmd/codex-app ...
 ```
 
 随后：
@@ -109,7 +109,7 @@ WeChat 采用 Hermes low tier：
 需要审批时：
 
 ```text
-[exec] 需要执行命令：bun run ...
+[exec] 需要执行命令：go run ./cmd/codex-app ...
 
 回复 1 确认，2 拒绝
 ```

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/nova-infra/codex-app/internal/config"
 	"github.com/nova-infra/codex-app/internal/render"
@@ -106,4 +107,8 @@ func joinLines(lines []string) string {
 		out += "- " + line
 	}
 	return out
+}
+
+func ShutdownTimeout() time.Duration {
+	return 5 * time.Second
 }

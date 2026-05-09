@@ -1,8 +1,10 @@
 # 项目状态
 
-- 当前实现仍然是 `v1`
+- 当前实现已切到 Go-only 主线，入口为 `cmd/codex-app`
+- 旧脚本 workspace 已从 active 主线移除
+- Go 服务已支持 `doctor`、`serve --dry-run`、`serve --addr`、`render-demo`
+- `serve` 非 dry-run 会启动 HTTP 服务，提供 `/health`、`/version`、`/config`、`/render-demo`
 - 后续主线以 `docs/architecture/` 为准
-- 旧阶段性文档已清理，不再作为规划依据
 - `RN` 已从当前仓库主线移除，短期不进入当前推进范围
 - 服务器已完成 `gh` 登录，当前账号：`ccken`
 - 登录仅用于仓库拉取、Issue / PR 等运维调试；不在仓库中记录任何 token

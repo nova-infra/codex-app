@@ -11,3 +11,20 @@ func TestSampleEvents(t *testing.T) {
 		t.Fatalf("last event should be final, got %s", events[len(events)-1].Kind)
 	}
 }
+
+func TestApplyProfileKeepsStructuredApproval(t *testing.T) {
+	events := []Event{{
+		Kind: EventKindApproval,
+		Approval: &ApprovalRequest{
+			RequestID: "approval-1",
+			Title:     "继续执行",
+		},
+	}}
+	got, _ := ApplyProfile(events, DefaultProfile(ChannelTelegram))
+	if len(got) != 1 {
+		t.Fatalf("approval event count = %d, want 1", len(got))
+	}
+	if got[0].Approval == nil || got[0].Approval.RequestID != "approval-1" {
+		t.Fatalf("approval = %#v", got[0].Approval)
+	}
+}

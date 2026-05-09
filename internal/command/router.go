@@ -16,39 +16,68 @@ import (
 	"github.com/nova-infra/codex-app/internal/server"
 )
 
-const usage = `codex-app Go preview
+const usage = `codex-app Go service
 
 Usage:
   codex-app render-demo --channel telegram|wechat|lark|all
-  codex-app project list
-  codex-app provider list
+  codex-app project list [--config <path>]
+  codex-app provider list [--config <path>]
   codex-app capabilities list [--channel <telegram|wechat|lark|all>]
-  codex-app serve [--dry-run] [--project <name>] [--config <path>]
+  codex-app serve [--dry-run] [--project <name>] [--config <path>] [--addr <host:port>]
+  codex-app lark token
+  codex-app lark send --chat <chat_id> --text <text>
+  codex-app telegram token
+  codex-app telegram updates [--limit <n>]
+  codex-app telegram wait [--timeout <seconds>] [--write-env]
+  codex-app telegram send --chat <chat_id> --text <text>
+  codex-app weixin token
+  codex-app weixin qr
+  codex-app weixin qr-wait [--timeout <seconds>] [--write-env]
+  codex-app weixin qr-confirm --qrcode <qrcode> [--timeout <seconds>] [--write-env]
+  codex-app weixin qr-status --qrcode <qrcode> [--write-env]
+  codex-app weixin updates [--limit <n>]
+  codex-app weixin wait [--timeout <seconds>] [--reply] [--write-e2e] [--until-approval]
+  codex-app weixin send --user <userid> --text <text>
+  codex-app release-check [--config <path>] [--smoke] [--require-e2e] [--strict-exit]
+  codex-app release-evidence mark --telegram-inbound|--weixin-inbound|--approval-real
+  codex-app release-unblock
   codex-app doctor [--config <path>]
   codex-app help
 
-The Go preview is milestone 2 of the rewrite. It renders a mock Codex event
-stream into platform-specific messages and exposes lightweight discovery commands.
+The Go service renders Codex events into platform-specific messages and exposes
+HTTP endpoints for health, version, config, and render-demo smoke checks.
 `
 
-// Router executes CLI commands for the Go preview path.
+// Router executes CLI commands for the Go service path.
 type Router struct {
 	out                io.Writer
-	listProjects       func() ([]string, error)
-	listProviders      func() ([]string, error)
+	listProjects       func(configPath string) ([]string, error)
+	listProviders      func(configPath string) ([]string, error)
 	listCapabilities   func(channel string) ([]string, error)
 	renderDemoDelegate func(channelName string) (string, error)
 }
 
-func defaultListProjects() ([]string, error) {
-	return []string{"default"}, nil
+func defaultListProjects(configPath string) ([]string, error) {
+	loaded, err := config.Load(configPath)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(loaded.Config.Projects))
+	for _, p := range loaded.Config.Projects {
+		names = append(names, p.Name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
-func defaultListProviders() ([]string, error) {
-	channels := channel.ListChannels()
-	names := make([]string, len(channels))
-	for i, ch := range channels {
-		names[i] = string(ch)
+func defaultListProviders(configPath string) ([]string, error) {
+	loaded, err := config.Load(configPath)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(loaded.Config.Providers))
+	for _, providerCfg := range loaded.Config.Providers {
+		names = append(names, providerCfg.Name)
 	}
 	sort.Strings(names)
 	return names, nil
@@ -95,11 +124,19 @@ func NewRouter(out io.Writer, opts ...func(*Router)) *Router {
 }
 
 func WithListProjects(fn func() ([]string, error)) func(*Router) {
-	return func(r *Router) { r.listProjects = fn }
+	return func(r *Router) {
+		r.listProjects = func(_ string) ([]string, error) {
+			return fn()
+		}
+	}
 }
 
 func WithListProviders(fn func() ([]string, error)) func(*Router) {
-	return func(r *Router) { r.listProviders = fn }
+	return func(r *Router) {
+		r.listProviders = func(_ string) ([]string, error) {
+			return fn()
+		}
+	}
 }
 
 func WithListCapabilities(fn func(string) ([]string, error)) func(*Router) {
@@ -130,8 +167,20 @@ func (r *Router) Run(args []string) error {
 		return r.runCapabilities(args[1:])
 	case "doctor":
 		return r.runDoctor(args[1:])
+	case "lark":
+		return r.runLark(args[1:])
+	case "telegram":
+		return r.runTelegram(args[1:])
+	case "weixin", "wechat":
+		return r.runWeixin(args[1:])
 	case "serve":
 		return r.runServe(args[1:])
+	case "release-check":
+		return r.runReleaseCheck(args[1:])
+	case "release-evidence":
+		return r.runReleaseEvidence(args[1:])
+	case "release-unblock":
+		return r.runReleaseUnblock(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 	}
@@ -218,23 +267,24 @@ func (r *Router) runServe(args []string) error {
 	dryRun := fs.Bool("dry-run", false, "print startup plan without starting")
 	projectName := fs.String("project", "", "project name to use")
 	configPath := fs.String("config", "", "path to JSON config")
+	addr := fs.String("addr", server.DefaultAddr, "HTTP listen address")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return errors.New("serve does not accept positional arguments")
 	}
-	plan, err := server.NewServePlanWithConfig(*dryRun, *projectName, *configPath)
+	plan, err := server.NewServePlanWithConfig(*dryRun, *projectName, *configPath, *addr)
 	if err != nil {
 		return err
 	}
 	if jsonMode {
 		return printJSON(r.out, map[string]any{
 			"ok":   true,
-			"data": map[string]any{"project": *projectName, "dry_run": *dryRun, "plan": plan.Plan},
+			"data": map[string]any{"project": *projectName, "dry_run": *dryRun, "addr": *addr, "plan": plan.Plan},
 		})
 	}
-	msg, err := server.Start(server.ServeOptions{DryRun: *dryRun, ProjectName: *projectName, ConfigPath: *configPath})
+	msg, err := server.Start(server.ServeOptions{DryRun: *dryRun, ProjectName: *projectName, ConfigPath: *configPath, Addr: *addr})
 	if err != nil {
 		return err
 	}
@@ -243,10 +293,19 @@ func (r *Router) runServe(args []string) error {
 }
 
 func (r *Router) runProject(args []string) error {
-	if len(args) != 1 || args[0] != "list" {
+	if len(args) < 1 || args[0] != "list" {
 		return fmt.Errorf("project requires a subcommand. e.g. project list\n\n%s", usage)
 	}
-	projects, err := r.listProjects()
+	fs := flag.NewFlagSet("project list", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	configPath := fs.String("config", "", "path to JSON config")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return errors.New("project list does not accept positional arguments")
+	}
+	projects, err := r.listProjects(*configPath)
 	if err != nil {
 		return err
 	}
@@ -263,10 +322,19 @@ func (r *Router) runProject(args []string) error {
 }
 
 func (r *Router) runProvider(args []string) error {
-	if len(args) != 1 || args[0] != "list" {
+	if len(args) < 1 || args[0] != "list" {
 		return fmt.Errorf("provider requires a subcommand. e.g. provider list\n\n%s", usage)
 	}
-	providers, err := r.listProviders()
+	fs := flag.NewFlagSet("provider list", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	configPath := fs.String("config", "", "path to JSON config")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return errors.New("provider list does not accept positional arguments")
+	}
+	providers, err := r.listProviders(*configPath)
 	if err != nil {
 		return err
 	}
@@ -321,6 +389,7 @@ func Run(args []string, out io.Writer) error {
 
 func printJSON(out io.Writer, payload any) error {
 	encoder := json.NewEncoder(out)
+	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(payload)
 }

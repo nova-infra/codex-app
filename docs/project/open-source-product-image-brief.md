@@ -104,8 +104,8 @@
 ### 3.5 开源友好
 
 - 输出默认脱敏，避免 token 直接暴露
-- release/changelog 走 changesets 自动化
-- PR 有 changeset 校验
+- release 走 Go 构建自动化
+- PR 有 Go smoke 校验
 - release PR 自动生成
 - 清理二进制产物和无关测试文件
 

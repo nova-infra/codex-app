@@ -16,3 +16,10 @@ func TestChannelCredentialChecksWarn(t *testing.T) {
 		t.Fatalf("expected warning check, got %#v", checks)
 	}
 }
+
+func TestMissingWeixinEnvAcceptsILinkBotToken(t *testing.T) {
+	t.Setenv("WEIXIN_ILINK_BOT_TOKEN", "bot")
+	if missing := MissingChannelEnv("wechat"); len(missing) != 0 {
+		t.Fatalf("unexpected missing env: %v", missing)
+	}
+}

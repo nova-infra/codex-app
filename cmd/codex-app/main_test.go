@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nova-infra/codex-app/internal/channel"
 	"github.com/nova-infra/codex-app/internal/render"
 )
 
@@ -14,7 +13,7 @@ func TestRunHelp(t *testing.T) {
 	if err := run([]string{"help"}, &out); err != nil {
 		t.Fatalf("run help: %v", err)
 	}
-	for _, want := range []string{"render-demo", "project list", "provider list", "capabilities list", "doctor", "serve"} {
+	for _, want := range []string{"render-demo", "project list", "provider list", "capabilities list", "doctor", "serve", "telegram token", "weixin token", "lark token"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("help missing %s: %s", want, out.String())
 		}
@@ -46,9 +45,13 @@ func TestRunProviderList(t *testing.T) {
 	if err := run([]string{"provider", "list"}, &out); err != nil {
 		t.Fatalf("run provider list: %v", err)
 	}
-	for _, want := range channel.ListChannels() {
-		if !strings.Contains(out.String(), string(want)) {
-			t.Fatalf("expected provider %q in output, got %q", want, out.String())
+	got := out.String()
+	if !strings.Contains(got, "cliproxy") {
+		t.Fatalf("expected provider list output, got %q", got)
+	}
+	for _, channelName := range []string{"telegram", "wechat", "lark"} {
+		if strings.Contains(got, channelName) {
+			t.Fatalf("provider list must not show channel %q: %q", channelName, got)
 		}
 	}
 }

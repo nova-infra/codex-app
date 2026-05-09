@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>codex-app PRD 计划：Go Runtime 与 Hermes 返回逻辑</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --black: #000;
+      --white: #fff;
+      --text: rgba(0,0,0,.78);
+      --muted: rgba(0,0,0,.54);
+      --faint: rgba(0,0,0,.36);
+      --line: rgba(0,0,0,.11);
+      --line-soft: rgba(0,0,0,.06);
+      --surface: #fbfbfb;
+      --surface-2: #f5f5f5;
+      --ok: #087a45;
+      --warn: #a15c00;
+      --bad: #c62828;
+      --info: #155eef;
+      --font-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--white);
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.72;
+      letter-spacing: 0;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      line-break: strict;
+      word-break: normal;
+      overflow-wrap: anywhere;
+    }
+
+    a { color: var(--black); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    code, pre { font-family: var(--font-mono); }
+    code {
+      padding: 1px 5px;
+      border: 1px solid var(--line-soft);
+      border-radius: 6px;
+      background: var(--surface-2);
+      color: var(--black);
+      font-size: .92em;
+    }
+    pre {
+      overflow: auto;
+      margin: 10px 0;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: #111;
+      color: #f3f3f3;
+      font-size: 12.5px;
+      line-height: 1.62;
+    }
+    pre code { padding: 0; border: 0; background: transparent; color: inherit; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 238px minmax(0, 1fr);
+      gap: 18px;
+      width: min(1320px, calc(100% - 28px));
+      margin: 0 auto;
+      padding: 14px 0 48px;
+    }
+    aside {
+      position: sticky;
+      top: 12px;
+      height: calc(100vh - 24px);
+      overflow: auto;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255,255,255,.94);
+      backdrop-filter: blur(14px);
+    }
+    .brand {
+      display: grid;
+      grid-template-columns: 32px 1fr;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 4px 10px;
+      margin-bottom: 6px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .logo {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--black);
+      color: var(--white);
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .brand strong {
+      display: block;
+      color: var(--black);
+      font-size: 13px;
+      line-height: 1.28;
+    }
+    .brand span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      line-height: 1.2;
+    }
+    nav { display: grid; gap: 1px; }
+    nav a {
+      display: block;
+      padding: 6px 8px;
+      border-radius: 999px;
+      color: var(--black);
+      text-decoration: none;
+      font-size: 13px;
+      line-height: 1.32;
+    }
+    nav a:hover { background: rgba(0,0,0,.07); }
+
+    main { min-width: 0; }
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 34px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: linear-gradient(180deg, #fff 0%, #f7f7f7 100%);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(rgba(0,0,0,.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,0,0,.035) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,.42), transparent 74%);
+    }
+    .hero > * { position: relative; z-index: 1; }
+    .eyebrow {
+      display: inline-flex;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--black);
+      color: var(--white);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: .04em;
+    }
+    h1 {
+      max-width: 920px;
+      margin: 16px 0 10px;
+      color: var(--black);
+      font-size: clamp(34px, 5vw, 58px);
+      font-weight: 560;
+      line-height: 1.14;
+      letter-spacing: -0.025em;
+    }
+    .lead {
+      max-width: 850px;
+      margin: 0;
+      color: rgba(0,0,0,.68);
+      font-size: 16px;
+      line-height: 1.78;
+    }
+
+    section {
+      margin-top: 12px;
+      padding: 20px 22px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--white);
+    }
+    h2 {
+      margin: 0 0 12px;
+      color: var(--black);
+      font-size: 27px;
+      font-weight: 560;
+      line-height: 1.24;
+      letter-spacing: -0.018em;
+    }
+    h3 {
+      margin: 16px 0 6px;
+      color: var(--black);
+      font-size: 18px;
+      font-weight: 620;
+      line-height: 1.32;
+    }
+    p { max-width: 82ch; margin: 8px 0; }
+    ul, ol { margin: 8px 0; padding-left: 1.35em; }
+    li + li { margin-top: 4px; }
+    strong { color: var(--black); font-weight: 620; }
+
+    .meta-grid, .grid2, .grid3, .grid4 {
+      display: grid;
+      gap: 8px;
+    }
+    .meta-grid { grid-template-columns: repeat(4, minmax(0,1fr)); margin-top: 18px; }
+    .grid2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .grid3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+    .grid4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
+    .card, .meta, .phase {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+      padding: 12px 13px;
+    }
+    .meta span, .card small, .phase small {
+      display: block;
+      color: var(--muted);
+      font-size: 12.5px;
+      line-height: 1.55;
+    }
+    .meta strong, .card b, .phase b {
+      display: block;
+      margin-top: 3px;
+      color: var(--black);
+      font-size: 14px;
+      line-height: 1.36;
+    }
+
+    .callout {
+      position: relative;
+      padding: 12px 14px 12px 42px;
+      border: 1px dashed var(--black);
+      border-radius: 12px;
+      background: var(--surface);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+    .callout::before {
+      content: "";
+      position: absolute;
+      left: 15px;
+      top: 17px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--black);
+    }
+
+    table {
+      width: 100%;
+      margin: 10px 0;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--white);
+      font-size: 13.5px;
+    }
+    th, td {
+      padding: 9px 10px;
+      border-right: 1px solid var(--line-soft);
+      border-bottom: 1px solid var(--line-soft);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--surface-2);
+      color: var(--black);
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 500;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    tr:last-child td { border-bottom: 0; }
+    th:last-child, td:last-child { border-right: 0; }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--white);
+      color: var(--black);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .tag.ok { border-color: rgba(8,122,69,.22); color: var(--ok); background: rgba(8,122,69,.06); }
+    .tag.warn { border-color: rgba(161,92,0,.24); color: var(--warn); background: rgba(161,92,0,.07); }
+    .tag.bad { border-color: rgba(198,40,40,.22); color: var(--bad); background: rgba(198,40,40,.06); }
+    .tag.info { border-color: rgba(21,94,239,.22); color: var(--info); background: rgba(21,94,239,.06); }
+    .status-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 6px;
+      margin: 10px 0;
+    }
+    .flow div {
+      min-height: 72px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--black);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .flow b { display: block; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
+
+    @media (max-width: 900px) {
+      .layout { display: block; width: min(100% - 20px, 720px); padding-top: 10px; }
+      aside { position: static; height: auto; margin-bottom: 10px; }
+      nav { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .hero { padding: 24px 18px; }
+      section { padding: 18px 16px; }
+      .meta-grid, .grid2, .grid3, .grid4, .flow { grid-template-columns: 1fr; }
+      h1 { font-size: 34px; }
+      h2 { font-size: 23px; }
+      table { display: block; overflow-x: auto; white-space: nowrap; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <div class="brand">
+        <div class="logo">PRD</div>
+        <div>
+          <strong>codex-app PRD 计划</strong>
+          <span>requirements-driven</span>
+        </div>
+      </div>
+      <nav>
+        <a href="#source">01 材料与诊断</a>
+        <a href="#summary">02 需求概述</a>
+        <a href="#goals">03 目标与非目标</a>
+        <a href="#users">04 用户与场景</a>
+        <a href="#terms">05 术语定义</a>
+        <a href="#scope">06 功能范围</a>
+        <a href="#requirements">07 功能需求</a>
+        <a href="#data">08 数据与状态</a>
+        <a href="#metrics">09 指标与验收</a>
+        <a href="#backend">10 后端落地问题</a>
+        <a href="#release">11 发布计划</a>
+        <a href="#version">12 版本记录</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="hero">
+        <span class="eyebrow">PRD PLAN · 2026-05-10</span>
+        <h1>codex-app Go Runtime 与 Hermes 返回逻辑 PRD 计划</h1>
+        <p class="lead">这份计划把旧的 <code>go-rewrite-plan.html</code> 与当前 <code>channels/hermes-return-logic-plan.html</code> 合并为一个 requirements-driven PRD 入口：先确认产品边界，再按 Go runtime、Codex app-server、project/provider/session、TG/Weixin/Lark、Hermes renderer 的顺序交付。</p>
+        <div class="meta-grid">
+          <div class="meta"><span>需求编号</span><strong>PRD-CODEXAPP-GO-HERMES-001</strong></div>
+          <div class="meta"><span>所属项目</span><strong>codex-app</strong></div>
+          <div class="meta"><span>文档状态</span><strong>PRD 计划版</strong></div>
+          <div class="meta"><span>当前版本</span><strong>v0.1</strong></div>
+        </div>
+      </header>
+
+      <section id="source">
+        <h2>01. 材料与诊断</h2>
+        <div class="callout"><strong>驱动方式：</strong>已按 SkillHub requirements 0.1.3 的 PRD 流程处理：先做材料诊断，区分已确认、推断和需确认项；再补后端落地缺口；最后形成可交付的 PRD 计划。来源：<a href="https://skillhub.bigo.sg/skills/requirements">https://skillhub.bigo.sg/skills/requirements</a>。</div>
+
+        <h3>输入材料</h3>
+        <table>
+          <thead><tr><th>材料</th><th>状态</th><th>提取出的关键事实</th></tr></thead>
+          <tbody>
+            <tr><td><code>docs/architecture/go-rewrite-plan.html</code></td><td><span class="tag warn">git 中已删除</span></td><td>Go 重写方向、目标目录、cc-connect 复用地图、TG/Weixin/Lark 优先级、Phase 0-8、每阶段最低验收。</td></tr>
+            <tr><td><a href="channels/hermes-return-logic-plan.html"><code>channels/hermes-return-logic-plan.html</code></a></td><td><span class="tag ok">当前存在</span></td><td>Hermes-style renderer、DisplayProfile、Codex raw event 归一、reasoning 过滤、媒体剥离、平台分层展示策略。</td></tr>
+            <tr><td><code>docs/architecture/roadmap.md</code></td><td><span class="tag ok">当前存在</span></td><td>当前架构主线：内核、capability、channel、状态层收敛；短期 Web 冻结，社交入口优先。</td></tr>
+            <tr><td><code>internal/*</code> Go 代码</td><td><span class="tag ok">当前存在</span></td><td>已出现 Go runtime 主线：config、project、provider、session、codex bridge、render、channel、command、server、Lark runtime。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>材料覆盖度</h3>
+        <table>
+          <thead><tr><th>维度</th><th>判断</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>背景与问题</td><td><span class="tag ok">已覆盖</span></td><td>旧 TS/Bun workspace 边界过厚，channel 与状态/渲染/命令耦合。</td></tr>
+            <tr><td>目标与非目标</td><td><span class="tag ok">已覆盖</span></td><td>目标是 Codex-only 社交入口；非目标是全 Agent 平台、Web channel、管理后台。</td></tr>
+            <tr><td>用户与场景</td><td><span class="tag warn">需产品化整理</span></td><td>旧计划有平台入口和验收链路，但没有按角色写成 PRD 场景。</td></tr>
+            <tr><td>功能范围</td><td><span class="tag ok">已覆盖</span></td><td>Go runtime、project/provider/session、Codex bridge、TG/Weixin/Lark、Hermes renderer。</td></tr>
+            <tr><td>业务规则</td><td><span class="tag warn">部分推断</span></td><td>DisplayProfile、approval、reasoning 过滤、媒体剥离较明确；命令权限、session ownership 仍需锁定。</td></tr>
+            <tr><td>数据与字段</td><td><span class="tag warn">部分推断</span></td><td>配置和状态字段可从 Go 代码推断，但还需要以配置 schema 固化。</td></tr>
+            <tr><td>状态与异常</td><td><span class="tag warn">部分推断</span></td><td>旧计划有 fail fast、fallback、resume/fallback；缺少跨 channel 完整状态表。</td></tr>
+            <tr><td>验收标准</td><td><span class="tag ok">已覆盖</span></td><td>旧计划已给出每阶段最低验收和三端真实消息链路。</td></tr>
+            <tr><td>风险与依赖</td><td><span class="tag ok">已覆盖</span></td><td>范围失控、重写期间断档、TS 删除时机、Lark 复杂化。</td></tr>
+            <tr><td>版本记录</td><td><span class="tag info">本文件补齐</span></td><td>本 PRD 计划作为 v0.1 统一入口。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="summary">
+        <h2>02. 需求概述</h2>
+        <h3>2.1 需求简介</h3>
+        <p>将 <code>codex-app</code> 从历史 TS/Bun workspace 迁移为 Go 主线运行时，并建立一套统一的 Codex 社交入口产品能力。核心不是“换语言”，而是把 project、provider、codex_home、session、command、approval、render、channel readiness 都收敛到 Go runtime 的稳定 contract。</p>
+
+        <h3>2.2 业务目标</h3>
+        <ul>
+          <li>让用户可以在 Telegram、Weixin、Lark/Feishu 中稳定触发 Codex turn，并获得符合平台能力的低噪音回复。</li>
+          <li>让开发者只维护一套 Go runtime 与一套 render event contract，不再在各 channel 里重复写进度、审批、媒体、错误和最终回复逻辑。</li>
+          <li>让部署方可以通过配置检查、凭据预检、dry-run 和最终装配输出判断当前实例是否可启动、可连通、可回滚。</li>
+        </ul>
+
+        <h3>2.3 预期收益</h3>
+        <div class="grid3">
+          <div class="card"><b>一致性</b><small>provider、model、mode、cwd、session、approval 命令跨 channel 表现一致。</small></div>
+          <div class="card"><b>低噪音</b><small>reasoning 默认隐藏，工具进度按平台能力展示，最终答案不与进度混杂。</small></div>
+          <div class="card"><b>可迁移</b><small>TS workspace 在 Go 端端到端可用后退出主线，保留迁移资料而不继续扩功能。</small></div>
+        </div>
+      </section>
+
+      <section id="goals">
+        <h2>03. 目标与非目标</h2>
+        <div class="grid2">
+          <div class="card">
+            <b>本期目标</b>
+            <ul>
+              <li>Go CLI 可启动、可 doctor、可 dry-run、可 render-demo。</li>
+              <li>配置模型支持 project、provider refs、project-local <code>CODEX_HOME</code>。</li>
+              <li>Codex bridge 支持 app-server launch command、session resume/fallback、provider config 写入。</li>
+              <li>统一 render event 与 DisplayProfile：high / medium / low / minimal。</li>
+              <li>TG、Weixin、Lark 三端至少各完成一条真实消息链路。</li>
+            </ul>
+          </div>
+          <div class="card">
+            <b>本期非目标</b>
+            <ul>
+              <li>不扩成 cc-connect 的多 Agent 平台。</li>
+              <li>不恢复 Web channel 为主线入口。</li>
+              <li>不建设 Web 管理后台。</li>
+              <li>不把 cron、relay、hooks、账号矩阵纳入第一轮。</li>
+              <li>不让 channel 拥有 session、approval、provider、tool state 的真相源。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="users">
+        <h2>04. 用户与场景</h2>
+        <table>
+          <thead><tr><th>角色</th><th>核心诉求</th><th>典型场景</th></tr></thead>
+          <tbody>
+            <tr><td>社交入口用户</td><td>在熟悉的聊天工具里调用 Codex，少看到无意义过程噪音。</td><td>在 TG 发起仓库问题；在 Weixin 发图并要求处理；在 Lark 群里 @ 机器人获取进度和结果。</td></tr>
+            <tr><td>部署/运营者</td><td>快速知道服务能不能启动、哪个 channel 缺凭据、是否会污染主 Codex Home。</td><td>运行 <code>doctor</code>、<code>serve --dry-run</code>、查看 readiness 与配置渲染结果。</td></tr>
+            <tr><td>开发者</td><td>新增或修改 channel 时不用复制 Codex 事件处理和渲染逻辑。</td><td>修改 <code>internal/render</code> 一处规则后，TG/Weixin/Lark 均按 profile 生效。</td></tr>
+            <tr><td>维护者</td><td>从 TS 主线平滑迁移到 Go，并在真实链路可用后删除 legacy。</td><td>先保留 TS 作为迁移资料，Go 三端通过验收后清理 <code>packages/</code> 与 Bun 配置。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>核心使用流</h3>
+        <div class="flow">
+          <div><b>1</b>用户在 channel 发送消息或命令</div>
+          <div><b>2</b>channel runtime 归一输入和上下文</div>
+          <div><b>3</b>core 校验 project、provider、session、permission</div>
+          <div><b>4</b>Codex bridge 启动或恢复 app-server session</div>
+          <div><b>5</b>render pipeline 过滤、分段、提取媒体、生成 RenderEvent</div>
+          <div><b>6</b>platform renderer 按 DisplayProfile 输出结果</div>
+        </div>
+      </section>
+
+      <section id="terms">
+        <h2>05. 术语定义</h2>
+        <table>
+          <thead><tr><th>术语</th><th>定义</th><th>状态</th></tr></thead>
+          <tbody>
+            <tr><td>Project</td><td>Codex 运行时项目单元，包含 cwd、provider refs、project-local <code>CODEX_HOME</code> 与 channel bindings。</td><td><span class="tag ok">已确认</span></td></tr>
+            <tr><td>Provider</td><td>模型和认证配置引用，运行时负责按 project 写入 Codex 可读取的 provider 配置。</td><td><span class="tag ok">已确认</span></td></tr>
+            <tr><td>Session</td><td>一次 Codex 对话或可恢复上下文，必须由 core/session 层管理，channel 不作为真相源。</td><td><span class="tag ok">已确认</span></td></tr>
+            <tr><td>RenderEvent</td><td>从 Codex raw event 归一后的展示事件，如 text_delta、tool_start、tool_done、approval、final、error、media。</td><td><span class="tag ok">已确认</span></td></tr>
+            <tr><td>DisplayProfile</td><td>平台展示策略集合，决定工具进度、stream/edit、card/plain text、reasoning、媒体和 fallback。</td><td><span class="tag ok">已确认</span></td></tr>
+            <tr><td>Hermes-style renderer</td><td>统一返回逻辑：core 产出稳定事件，renderer 按 profile 决定用户看到什么。</td><td><span class="tag ok">已确认</span></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="scope">
+        <h2>06. 功能范围</h2>
+        <h3>6.1 本期包含</h3>
+        <table>
+          <thead><tr><th>模块</th><th>需求说明</th><th>优先级</th><th>来源</th></tr></thead>
+          <tbody>
+            <tr><td>Go CLI 与 runtime</td><td>提供 <code>cmd/codex-app</code>、配置加载、启动诊断、serve/dry-run/render-demo。</td><td>P0</td><td>Go 重写计划 + 当前 Go 代码</td></tr>
+            <tr><td>Project/Provider/CODEX_HOME</td><td>项目级配置隔离，支持 provider refs 和 project-local <code>CODEX_HOME</code> payload。</td><td>P0</td><td>Go 重写计划</td></tr>
+            <tr><td>Codex app-server bridge</td><td>生成 launch command，处理 session resume/fallback，写入 provider config。</td><td>P0</td><td>Go 重写计划 + 当前 <code>internal/codex</code></td></tr>
+            <tr><td>Command Router</td><td>统一 provider/model/mode/cwd/session/approval 命令，不让 channel 分叉实现。</td><td>P0</td><td>Go 重写计划 + roadmap</td></tr>
+            <tr><td>Hermes Render Pipeline</td><td>归一 raw event、过滤 reasoning、工具边界分段、媒体剥离、长文本拆分、fallback。</td><td>P0</td><td>Hermes 计划</td></tr>
+            <tr><td>Telegram channel</td><td>high tier：tool progress all、stream/edit on、inline approval、HTML 降级。</td><td>P0</td><td>两个计划共同确认</td></tr>
+            <tr><td>Weixin channel</td><td>low tier：typing、final text、数字审批、图片/文件 relay，不展示工具进度。</td><td>P1</td><td>两个计划共同确认</td></tr>
+            <tr><td>Lark/Feishu channel</td><td>medium tier：card 优先、只显示新阶段、按钮审批、fallback text、群聊上下文。</td><td>P1</td><td>Hermes 计划 + 当前 Lark 代码</td></tr>
+          </tbody>
+        </table>
+
+        <h3>6.2 本期不包含</h3>
+        <ul>
+          <li>Web channel 主线、Web 管理后台、RN 入口。</li>
+          <li>Claude/Gemini/Kimi/OpenCode 等多 Agent 编排。</li>
+          <li>cron、relay、hooks、账号运营矩阵、复杂多租户后台。</li>
+          <li>Lark 文档、多维表格、审批流等办公套件深功能。</li>
+        </ul>
+      </section>
+
+      <section id="requirements">
+        <h2>07. 功能需求</h2>
+
+        <h3>FR-1 Go Runtime 基线</h3>
+        <table>
+          <thead><tr><th>项</th><th>要求</th></tr></thead>
+          <tbody>
+            <tr><td>前置条件</td><td>仓库已存在 <code>go.mod</code> 与 <code>cmd/codex-app</code>；TS/Bun 文件可作为迁移资料，但不再新增功能。</td></tr>
+            <tr><td>成功路径</td><td>用户运行 <code>go run ./cmd/codex-app --help</code>、<code>doctor</code>、<code>serve --dry-run</code> 可得到稳定输出。</td></tr>
+            <tr><td>失败路径</td><td>配置缺失、provider 无效、channel 凭据缺失时 fail fast，并指出缺失项和修复方向。</td></tr>
+            <tr><td>验收标准</td><td>CLI help 可用；doctor 能校验 project/provider/codex_home；dry-run 不启动外部连接也能输出装配结果。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>FR-2 Project / Provider / CODEX_HOME</h3>
+        <table>
+          <thead><tr><th>规则</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>配置真相源</td><td>project 是 channel 绑定和 Codex 执行上下文的根；provider 只能通过 ref 引用，不由 channel 直接拼接。</td></tr>
+            <tr><td>隔离规则</td><td>每个 project 默认使用 project-local <code>CODEX_HOME</code>，避免污染用户主 <code>~/.codex</code>。</td></tr>
+            <tr><td>写入规则</td><td>Codex bridge 负责生成 provider config payload；写入前应可 dry-run 展示。</td></tr>
+            <tr><td>异常规则</td><td>provider ref 不存在、模型为空、codex_home 不可写、cwd 不存在时阻止启动。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>FR-3 Session 与 Command Router</h3>
+        <table>
+          <thead><tr><th>能力</th><th>要求</th><th>验收</th></tr></thead>
+          <tbody>
+            <tr><td>Session ownership</td><td>session 真相源由 core/session 管理，channel 只传入 user、thread、project 与消息。</td><td>关闭任一 channel 不影响已有 session 存储结构。</td></tr>
+            <tr><td>Resume / fallback</td><td>有 session id 时尝试恢复；恢复失败时按规则创建新 session，并把 fallback 原因写入事件。</td><td>session store 单测覆盖恢复、缺失、损坏、fallback。</td></tr>
+            <tr><td>Command Router</td><td>provider、model、mode、cwd、session、approval 命令走统一 router。</td><td>TG/Weixin/Lark 命令语义一致，平台只负责输入输出形式。</td></tr>
+            <tr><td>Approval</td><td>approval 事件由 core 生成，renderer 按平台能力输出 inline button、数字菜单或 card button。</td><td>三个 channel 均能完成 confirm/reject，并能处理超时或无效输入。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>FR-4 Hermes Render Pipeline</h3>
+        <div class="flow">
+          <div><b>Normalize</b>Codex raw event 转 RenderEvent</div>
+          <div><b>Filter</b>默认过滤 reasoning 与 think 标签</div>
+          <div><b>Segment</b>工具事件切断 assistant stream</div>
+          <div><b>Extract</b>媒体 URL、文件、图片、音频从正文剥离</div>
+          <div><b>Profile</b>按 DisplayProfile 选择展示策略</div>
+          <div><b>Fallback</b>平台能力失败时降级为安全文本</div>
+        </div>
+        <table>
+          <thead><tr><th>平台</th><th>Profile</th><th>展示规则</th><th>失败处理</th></tr></thead>
+          <tbody>
+            <tr><td>Telegram</td><td>high</td><td>允许 stream/edit，显示完整工具进度，使用 inline keyboard。</td><td>edit 失败则发新消息；HTML 失败则转纯文本。</td></tr>
+            <tr><td>Weixin</td><td>low</td><td>只做 typing、最终纯文本、数字审批、媒体 relay；不展示 reasoning 和工具进度。</td><td>长文本分块；媒体失败时给出文本说明。</td></tr>
+            <tr><td>Lark/Feishu</td><td>medium</td><td>卡片优先，只显示新阶段，按钮审批，保留群聊 thread/reply 上下文。</td><td>卡片失败 fallback text；不能持续新增重复进度卡。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>FR-5 Channel Runtime</h3>
+        <table>
+          <thead><tr><th>Channel</th><th>本期交付</th><th>不做</th></tr></thead>
+          <tbody>
+            <tr><td>Telegram</td><td>文本、图片/文件、审批按钮、session 命令、provider/model 命令、最终回复。</td><td>不在 TG 内部维护独立 session 和 provider 规则。</td></tr>
+            <tr><td>Weixin</td><td>iLink 收发、数字审批、文本分块、图片 relay、typing。</td><td>不复制 TG 的工具进度流和 edit 逻辑。</td></tr>
+            <tr><td>Lark/Feishu</td><td>@ 触发、卡片审批、fallback text、群聊 reply/thread 上下文、WS readiness。</td><td>不进入文档/表格/复杂审批套件。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="data">
+        <h2>08. 数据与状态</h2>
+        <h3>8.1 核心字段</h3>
+        <table>
+          <thead><tr><th>字段</th><th>中文名</th><th>类型</th><th>来源</th><th>校验规则</th></tr></thead>
+          <tbody>
+            <tr><td><code>project.id</code></td><td>项目标识</td><td>string</td><td>config</td><td>必填；全局唯一；用于绑定 channel 与 session。</td></tr>
+            <tr><td><code>project.cwd</code></td><td>执行目录</td><td>path</td><td>config</td><td>必须存在且可访问。</td></tr>
+            <tr><td><code>project.codex_home</code></td><td>项目 Codex Home</td><td>path</td><td>config</td><td>默认 project-local；必须可创建或可写。</td></tr>
+            <tr><td><code>provider.ref</code></td><td>Provider 引用</td><td>string</td><td>config</td><td>必须能解析到 provider profile。</td></tr>
+            <tr><td><code>channel.type</code></td><td>入口类型</td><td>enum</td><td>config</td><td><code>telegram</code> / <code>weixin</code> / <code>lark</code>。</td></tr>
+            <tr><td><code>display.profile</code></td><td>展示策略</td><td>enum</td><td>runtime</td><td>high / medium / low / minimal，可被平台 override。</td></tr>
+            <tr><td><code>session.id</code></td><td>会话标识</td><td>string</td><td>runtime</td><td>由 core/session 分配和恢复。</td></tr>
+            <tr><td><code>render_event.kind</code></td><td>渲染事件类型</td><td>enum</td><td>Codex bridge</td><td>text_delta / tool_start / tool_done / approval / final / error / media。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>8.2 状态与异常</h3>
+        <table>
+          <thead><tr><th>状态</th><th>进入条件</th><th>退出条件</th><th>异常处理</th></tr></thead>
+          <tbody>
+            <tr><td>ConfigInvalid</td><td>配置缺失或字段不合法。</td><td>用户修正配置并重新 doctor。</td><td>阻止启动，输出具体字段路径。</td></tr>
+            <tr><td>ChannelNotReady</td><td>channel 启用但凭据、webhook、WS 或权限缺失。</td><td>凭据补齐并 readiness 通过。</td><td>dry-run 可展示，正式 serve fail fast。</td></tr>
+            <tr><td>SessionStarting</td><td>收到用户消息，需要新建或恢复 Codex session。</td><td>app-server session 可用。</td><td>恢复失败时 fallback，新建原因进入 render event。</td></tr>
+            <tr><td>TurnStreaming</td><td>Codex 产生 delta 或 tool event。</td><td>收到 final 或 error。</td><td>renderer 按 profile 合并、编辑、分块或隐藏。</td></tr>
+            <tr><td>ApprovalWaiting</td><td>Codex 请求用户确认。</td><td>用户确认/拒绝/超时。</td><td>无效输入提示一次；超时按 reject 或 expired 规则处理。</td></tr>
+            <tr><td>DeliveryFallback</td><td>卡片、edit、媒体或富文本发送失败。</td><td>fallback text 发送成功或记录最终失败。</td><td>不能丢失最终答案；失败原因进入日志。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="metrics">
+        <h2>09. 指标与验收</h2>
+        <h3>9.1 关键指标</h3>
+        <table>
+          <thead><tr><th>指标</th><th>口径</th><th>目标</th></tr></thead>
+          <tbody>
+            <tr><td>doctor 通过率</td><td>启用 channel 的配置和凭据检查通过数 / 启用 channel 数。</td><td>上线前 100%。</td></tr>
+            <tr><td>真实消息链路成功率</td><td>手机端或群聊发起 Codex turn，收到最终回复的成功率。</td><td>TG/Weixin/Lark 各至少 1 条通过，灰度期持续记录。</td></tr>
+            <tr><td>render fallback 率</td><td>富文本/card/edit/media 失败后 fallback text 的次数。</td><td>可观测；高于阈值时回退平台策略。</td></tr>
+            <tr><td>session resume 成功率</td><td>带 session id 请求成功恢复的比例。</td><td>灰度期建立基线。</td></tr>
+            <tr><td>噪音事件曝光</td><td>reasoning、内部 tool item、无意义 started 事件被用户看到的次数。</td><td>默认 0。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>9.2 阶段验收</h3>
+        <div class="grid2">
+          <div class="phase"><span class="tag info">Phase 0</span><b>冻结 TS 主线</b><small>清点未提交改动；TS/Bun 仅作为迁移资料，不再加功能。</small></div>
+          <div class="phase"><span class="tag ok">Phase 1</span><b>Go 骨架</b><small><code>go run ./cmd/codex-app --help</code> 可用；默认配置路径可打印。</small></div>
+          <div class="phase"><span class="tag ok">Phase 2</span><b>配置与 project/provider</b><small><code>doctor --config</code> 和 <code>serve --dry-run --config</code> 能验证 provider/project/codex_home。</small></div>
+          <div class="phase"><span class="tag ok">Phase 3</span><b>Core engine</b><small>session store、channel credential preflight、Hermes render contract 均有 Go 测试。</small></div>
+          <div class="phase"><span class="tag warn">Phase 4</span><b>Codex agent</b><small>生成 app-server launch command，并进入真实 session resume/fallback。</small></div>
+          <div class="phase"><span class="tag warn">Phase 5</span><b>Telegram E2E</b><small>TG 手机端完成一条真实 Codex turn，含审批或工具事件。</small></div>
+          <div class="phase"><span class="tag warn">Phase 6</span><b>Weixin E2E</b><small>Weixin 完成真实 Codex turn，展示 low tier 低噪音结果。</small></div>
+          <div class="phase"><span class="tag warn">Phase 7</span><b>Lark E2E</b><small>Lark 群聊或私聊完成真实 Codex turn，card 失败可 fallback。</small></div>
+          <div class="phase"><span class="tag warn">Phase 8</span><b>删除 TS legacy</b><small>Go 版可用后删除 <code>packages/</code>、<code>package.json</code>、<code>bun.lock</code>、<code>tsconfig.json</code>。</small></div>
+        </div>
+      </section>
+
+      <section id="backend">
+        <h2>10. 后端落地问题清单</h2>
+        <div class="callout"><strong>Backend gaps:</strong> requirements-clarifying-backend-gaps used; identified P0=6, P1=6, P2=3; P0 all preserved in Clarification Backlog; blocking P1 queued; non-blocking P1 preserved with status. 本文件是 PRD 计划版，下面问题进入开发前需要由需求负责人或实现负责人逐条确认。</div>
+
+        <h3>10.1 P0 必确认问题</h3>
+        <table>
+          <thead><tr><th>编号</th><th>对应需求内容</th><th>问题</th><th>影响</th><th>处理状态</th><th>落文位置</th></tr></thead>
+          <tbody>
+            <tr><td>P0-1</td><td>TS 到 Go 迁移边界</td><td>Go 主线是否完全取代 TS/Bun，还是保留 TS 兼容入口一段时间。</td><td>决定 Phase 8 删除范围、发布方式和回滚策略。</td><td><span class="tag warn">需确认</span></td><td>目标与非目标、发布计划</td></tr>
+            <tr><td>P0-2</td><td>Project / Provider 真相源</td><td>provider config 的最终写入策略是否只允许 Go runtime 生成，是否禁止 channel 自行写。</td><td>影响配置 schema、权限、dry-run 和故障定位。</td><td><span class="tag warn">需确认</span></td><td>FR-2</td></tr>
+            <tr><td>P0-3</td><td>Session ownership</td><td>session id、thread binding、resume fallback 的真相源和冲突处理规则需锁定。</td><td>影响多 channel 同项目并发、恢复失败、审批回调。</td><td><span class="tag warn">需确认</span></td><td>FR-3、状态表</td></tr>
+            <tr><td>P0-4</td><td>Channel readiness</td><td>正式启动时缺少某个启用 channel 凭据，是整体 fail fast 还是只禁用该 channel。</td><td>影响 serve 行为、部署体验和灰度发布。</td><td><span class="tag warn">需确认</span></td><td>FR-1、状态表</td></tr>
+            <tr><td>P0-5</td><td>Hermes render contract</td><td>RenderEvent 的 enum、字段和过滤策略是否作为所有 channel 的强制 contract。</td><td>影响 renderer 测试、平台扩展和旧逻辑删除。</td><td><span class="tag warn">需确认</span></td><td>FR-4</td></tr>
+            <tr><td>P0-6</td><td>真实 E2E 验收</td><td>TG/Weixin/Lark 的真实消息链路需要哪些账号、群、凭据和验收环境。</td><td>影响验收能否闭环。</td><td><span class="tag warn">需确认</span></td><td>指标与验收</td></tr>
+          </tbody>
+        </table>
+
+        <h3>10.2 P1 阻塞判断</h3>
+        <table>
+          <thead><tr><th>编号</th><th>问题</th><th>阻塞判断</th><th>目标确认时间</th><th>处理状态</th></tr></thead>
+          <tbody>
+            <tr><td>P1-1</td><td>Lark/Feishu 优先级从旧计划 P2 变化到当前最小真实链路后，是否提升为 P1。</td><td>阻塞排期和验收顺序</td><td>进入 Phase 5 前</td><td><span class="tag warn">需确认</span></td></tr>
+            <tr><td>P1-2</td><td>daemon / launchd / systemd 是否进入本期发布，还是先只保留 CLI serve。</td><td>阻塞部署方案</td><td>Phase 2 完成前</td><td><span class="tag warn">需确认</span></td></tr>
+            <tr><td>P1-3</td><td>provider config 写入是否需要备份、diff 和回滚。</td><td>阻塞安全策略</td><td>Phase 2 完成前</td><td><span class="tag warn">需确认</span></td></tr>
+            <tr><td>P1-4</td><td>approval 超时默认 reject、expired 还是继续等待。</td><td>阻塞状态机</td><td>Phase 3 完成前</td><td><span class="tag warn">需确认</span></td></tr>
+            <tr><td>P1-5</td><td>render fallback 失败后的最终用户提示和日志等级。</td><td>阻塞异常体验</td><td>Phase 4 完成前</td><td><span class="tag warn">需确认</span></td></tr>
+            <tr><td>P1-6</td><td>TS legacy 删除是否需要保留迁移 tag 或归档文档。</td><td>非阻塞，但影响审计</td><td>Phase 8 前</td><td><span class="tag info">后置确认</span></td></tr>
+          </tbody>
+        </table>
+
+        <h3>10.3 P2 后续优化</h3>
+        <ul>
+          <li>细化 metric 事件字段、日志采样和失败 dashboard。</li>
+          <li>补 Lark 卡片模板版本管理和降级文案规范。</li>
+          <li>补多项目并发压测与高频消息节流策略。</li>
+        </ul>
+      </section>
+
+      <section id="release">
+        <h2>11. 发布计划</h2>
+        <h3>11.1 发布方式</h3>
+        <ol>
+          <li>先以 Go CLI 本地可运行为基线，验证 <code>doctor</code>、<code>serve --dry-run</code> 和 render demo。</li>
+          <li>先接 Telegram 作为完整样板，再接 Weixin 低噪音链路，最后接 Lark 卡片链路。</li>
+          <li>三端真实链路通过后，再删除 TS/Bun legacy 文件和发布流程残留。</li>
+        </ol>
+
+        <h3>11.2 灰度策略</h3>
+        <table>
+          <thead><tr><th>阶段</th><th>范围</th><th>退出条件</th></tr></thead>
+          <tbody>
+            <tr><td>Alpha</td><td>本地 CLI + dry-run + 单元测试。</td><td>配置、session、render、channel readiness 测试通过。</td></tr>
+            <tr><td>Beta</td><td>单项目单 channel，优先 Telegram。</td><td>真实 turn、approval、错误 fallback 均通过。</td></tr>
+            <tr><td>Gamma</td><td>多 channel 同项目，加入 Weixin 与 Lark。</td><td>跨 channel 命令语义一致，session 不串线。</td></tr>
+            <tr><td>Release</td><td>Go 主线替代 TS 主线。</td><td>legacy 删除后测试和文档不再引用 Bun/TS 主线。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>11.3 回滚策略</h3>
+        <ul>
+          <li>在 Telegram E2E 通过前不删除 TS workspace。</li>
+          <li>在三端 E2E 全部通过前不把 TS legacy 从 git 历史之外完全不可达化。</li>
+          <li>provider config 写入必须具备 dry-run 输出；正式写入前记录目标路径和变更摘要。</li>
+          <li>单个 channel readiness 失败时允许先下线该 channel，但不能影响 core 配置诊断。</li>
+        </ul>
+      </section>
+
+      <section id="version">
+        <h2>12. 版本记录</h2>
+        <table>
+          <thead><tr><th>版本</th><th>日期</th><th>变更类型</th><th>变更摘要</th></tr></thead>
+          <tbody>
+            <tr><td>v0.1</td><td>2026-05-10</td><td>新增</td><td>合并 Go 重写计划与 Hermes 返回逻辑计划，按 requirements PRD 模板生成统一 PRD 计划。</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

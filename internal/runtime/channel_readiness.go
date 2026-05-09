@@ -9,7 +9,6 @@ import (
 
 var requiredChannelEnv = map[string][]string{
 	"telegram": {"TELEGRAM_BOT_TOKEN"},
-	"wechat":   {"WEIXIN_CORP_ID", "WEIXIN_CORP_SECRET", "WEIXIN_AGENT_ID"},
 	"lark":     {"LARK_APP_ID", "LARK_APP_SECRET"},
 }
 
@@ -30,6 +29,9 @@ func ChannelCredentialChecks(channels []string) []CheckResult {
 }
 
 func MissingChannelEnv(channel string) []string {
+	if isWeixinChannel(channel) {
+		return missingWeixinEnv()
+	}
 	required := requiredChannelEnv[channel]
 	missing := []string{}
 	for _, key := range required {
@@ -38,6 +40,29 @@ func MissingChannelEnv(channel string) []string {
 		}
 	}
 	return missing
+}
+
+func missingWeixinEnv() []string {
+	if strings.TrimSpace(os.Getenv("WEIXIN_ILINK_BOT_TOKEN")) != "" ||
+		strings.TrimSpace(os.Getenv("WEIXIN_BOT_TOKEN")) != "" {
+		return nil
+	}
+	corpKeys := []string{"WEIXIN_CORP_ID", "WEIXIN_CORP_SECRET", "WEIXIN_AGENT_ID"}
+	missing := []string{}
+	for _, key := range corpKeys {
+		if strings.TrimSpace(os.Getenv(key)) == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return []string{"WEIXIN_ILINK_BOT_TOKEN or WEIXIN_BOT_TOKEN or " + strings.Join(corpKeys, "+")}
+}
+
+func isWeixinChannel(channel string) bool {
+	name := strings.TrimSpace(strings.ToLower(channel))
+	return name == "wechat" || name == "weixin"
 }
 
 func MissingChannelEnvError(channels []string) error {

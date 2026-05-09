@@ -504,7 +504,7 @@
           <li>可选支持 <code>cleanupProgress=true</code>：成功后删除或折叠进度，失败保留错误线索。</li>
         </ol>
         <h3>用户观感</h3>
-        <pre><code>⚙️ bun run ...
+        <pre><code>⚙️ go run ./cmd/codex-app ...
 ✓ 修改 docs/architecture/...
 
 已完成。关键变更如下：
@@ -545,7 +545,7 @@
         </div>
         <h3>修改建议</h3>
         <ol>
-          <li>新增 <code>platform/feishu</code>，复用 cc-connect 的 card、ws_shared、preview cleaner 设计。</li>
+          <li>新增 <code>platform/feishu</code>，按本仓库 channel contract 实现 card、preview cleaner 设计。</li>
           <li>tool progress 使用 <code>new</code>：同类重复工具不刷，只在阶段变化时更新卡片。</li>
           <li>进度卡片可编辑则编辑；编辑失败再发一条 fallback 文本，不能持续新增卡片。</li>
           <li>approval 使用交互卡片按钮：确认 / 拒绝；卡片失败 fallback 为文本按钮说明。</li>
@@ -570,10 +570,10 @@
           <tbody>
             <tr><td><code>core/render_profile.go</code></td><td>定义 high/medium/low/minimal profile 和 per-platform override。</td><td><code>hermes-agent/gateway/display_config.py</code></td></tr>
             <tr><td><code>core/render_pipeline.go</code></td><td>统一过滤 reasoning、提取媒体、分段、批处理、长文本拆分。</td><td><code>stream_consumer.py</code>、<code>helpers.py</code></td></tr>
-            <tr><td><code>core/render_event.go</code></td><td>把 Codex raw event 转成稳定 render event。</td><td>当前 <code>EventPipeline</code> + cc-connect engine 思路</td></tr>
-            <tr><td><code>platform/telegram/renderer.go</code></td><td>TG HTML、inline keyboard、editMessageText、photo/file。</td><td>cc-connect telegram + 当前 TS sender/format</td></tr>
-            <tr><td><code>platform/weixin/renderer.go</code></td><td>纯文本、数字审批、iLink 分块、图片 relay。</td><td>cc-connect weixin + 当前 TS textFormat</td></tr>
-            <tr><td><code>platform/feishu/renderer.go</code></td><td>卡片、按钮、fallback、preview cleaner。</td><td>cc-connect feishu + Hermes feishu adapter</td></tr>
+            <tr><td><code>core/render_event.go</code></td><td>把 Codex raw event 转成稳定 render event。</td><td>当前 <code>EventPipeline</code> + 本仓库 Go runtime 思路</td></tr>
+            <tr><td><code>platform/telegram/renderer.go</code></td><td>TG HTML、inline keyboard、editMessageText、photo/file。</td><td>本仓库 telegram renderer/runtime</td></tr>
+            <tr><td><code>platform/weixin/renderer.go</code></td><td>纯文本、数字审批、iLink 分块、图片 relay。</td><td>本仓库 weixin renderer/runtime</td></tr>
+            <tr><td><code>platform/feishu/renderer.go</code></td><td>卡片、按钮、fallback、preview cleaner。</td><td>本仓库 lark renderer/runtime</td></tr>
           </tbody>
         </table>
         <pre><code>type RenderEvent struct {

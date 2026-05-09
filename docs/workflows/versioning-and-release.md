@@ -1,149 +1,46 @@
 # Versioning and Release Workflow
 
-This repository uses **Changesets** for open-source-standard version maintenance.
+本仓库已切到 Go-only 发布方式，不再使用 workspace package versioning。
 
-## Goals
+## 版本来源
 
-- Keep package versioning reviewable and explicit
-- Generate version PRs automatically from checked-in changesets
-- Let operators verify the deployed service version from the running service itself
-- Keep public workflow docs machine-agnostic and free of host-specific deployment details
+- 版本号记录在仓库根目录 `VERSION`。
+- 发布脚本读取 `VERSION`，并把当前 git sha 写入 `release.json`。
 
-## What is versioned
-
-The public packages in this workspace are versioned through their `package.json` files:
-
-- `@codex-app/server`
-- `@codex-app/core`
-- `@codex-app/channel-telegram`
-- `@codex-app/channel-wechat`
-- `@codex-app/cli`
-
-## Contributor workflow
-
-When a change should affect release notes or package versions, add a changeset:
+## 本地发布构建
 
 ```bash
-bun run changeset
+scripts/release.sh
 ```
 
-Then choose the package(s) and bump type:
+脚本会执行：
 
-- `patch` — bug fix, small improvement, safe behavior change
-- `minor` — backward-compatible feature
-- `major` — breaking change
+1. `go build` 构建 `cmd/codex-app`。
+2. 生成 `codex-app-server`。
+3. 写入 `release.json`。
+4. 更新 `current` 软链到最新 release。
+5. 保留最近 5 个 release 目录。
 
-This creates a markdown file under `.changeset/`.
+## CI smoke
 
-## Main branch workflow
+`.github/workflows/release.yml` 在 PR 和 main push 上运行：
 
-On every push to `main`, GitHub Actions runs:
+- `go test ./...`
+- `go build -o codex-app ./cmd/codex-app`
+- `./codex-app help`
+- `./codex-app doctor`
+- `./codex-app serve --dry-run`
 
-- `.github/workflows/release.yml`
+## 部署后验证
 
-That workflow:
-
-1. installs dependencies with Bun
-2. reads pending changesets
-3. creates or updates a **release/version PR**
-4. updates package versions and changelog entries in that PR
-
-On every pull request to `main`, GitHub Actions also runs:
-
-- `.github/workflows/changeset-status.yml`
-
-That workflow verifies the branch contains a valid pending changeset when release-worthy workspace changes are present.
-
-Repository secret requirement:
-
-- no custom release token is required
-- the workflow uses the default `GITHUB_TOKEN` provided by GitHub Actions
-
-## Concurrent change workflow
-
-This is the important rule when several feature or fix PRs are merged close together:
-
-- each merge to `main` can add, remove, or modify pending changesets
-- the release workflow does not create one immutable release PR per feature PR
-- instead, it keeps a single current **release/version PR** in sync with the latest state of `main`
-
-In practice:
-
-1. PR A merges to `main`
-2. GitHub Actions creates or updates the release PR with A's changesets
-3. PR B and PR C merge before the release PR is merged
-4. GitHub Actions re-runs and updates the same release PR so it now includes A + B + C
-5. operators review the aggregated version bumps and changelog output
-6. the release PR is merged once for the whole current batch
-7. deployment happens from that merged release commit, not from the earlier feature PR heads
-
-Operational implication:
-
-- do not deploy from a feature PR branch if you expect normal version history
-- do not assume the first generated release PR is final when more changes are still landing
-- deploy only after the current release PR has been merged, and deploy that exact merge commit
-
-## Deployment checklist
-
-For a production release, keep the deployment flow linear even if development was concurrent:
-
-1. fetch latest `origin/main`
-2. ensure the deployment worktree is clean
-3. check out the merged release commit from `main`
-4. install dependencies from the committed lockfile
-5. build the production artifact from that clean commit
-6. restart the service with the new artifact
-7. verify `GET /health` or `GET /version`
-
-Recommended verification after deploy:
-
-- `gitSha` matches the merged release commit you intended to deploy
-- `gitDirty` is `false`
-- the reported package `version` matches the release PR output
-
-## Release PR workflow
-
-When the automated version PR appears:
-
-1. review the version bumps and generated changelog updates
-2. merge the PR when ready
-3. deploy the updated service
-4. confirm the running service version through the service endpoints
-
-## Service-side version verification
-
-The running service exposes build metadata at:
+服务启动后验证：
 
 - `GET /health`
 - `GET /version`
+- `GET /config`
 
-Example:
+## 推荐规则
 
-```json
-{
-  "status": "ok",
-  "codex": true,
-  "version": "0.1.0",
-  "gitSha": "fdb4a87",
-  "gitDirty": false
-}
-```
-
-Fields:
-
-- `version` — package version from `@codex-app/server`
-- `gitSha` — deployed git commit SHA when available
-- `gitDirty` — whether the running service was built from uncommitted local changes
-
-## Recommended rules
-
-- Keep repo docs and CI generic; do not commit machine-specific deployment paths or secrets
-- CLI and workflow output should redact token-like fields by default
-- Use changesets for user-visible changes, fixes, and release-worthy internal changes
-- Prefer `gitDirty: false` in production deployments
-- Verify `/health` or `/version` after every deployment
-
-## Non-goals
-
-This public workflow does **not** document private host paths, private secrets, or machine-specific deployment commands.
-Those belong in private ops documentation or local agent memory, not in the open-source repository.
+- 发布前保持工作区干净。
+- 生产部署优先使用 clean commit 构建。
+- 每次部署后检查 `/health` 或 `/version`。

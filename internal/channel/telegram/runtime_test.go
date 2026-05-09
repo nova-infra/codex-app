@@ -70,8 +70,52 @@ func TestTelegramRuntimeGetUpdatesCallsHTTPBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get updates: %v", err)
 	}
-	if len(updates) != 1 || updates[0].UpdateID != 7 || updates[0].Payload != "hi" {
+	if len(updates) != 1 || updates[0].UpdateID != 7 || updates[0].Payload != "hi" || updates[0].ChannelID != "42" {
 		t.Fatalf("unexpected updates: %#v", updates)
+	}
+}
+
+func TestTelegramRuntimeGetUpdatesSinceCallsHTTPBoundary(t *testing.T) {
+	client := roundTripClient(func(r *http.Request) *http.Response {
+		if r.URL.Path != "/bottoken/getUpdates" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("offset"); got != "8" {
+			t.Fatalf("offset = %q", got)
+		}
+		if got := r.URL.Query().Get("timeout"); got != "10" {
+			t.Fatalf("timeout = %q", got)
+		}
+		return jsonResponse(`{"ok":true,"result":[]}`)
+	})
+
+	rt, err := NewRuntime(RuntimeConfig{BotToken: "token", APIBase: "https://telegram.example", HTTPClient: client})
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	if _, err := rt.GetUpdatesSince(context.Background(), 8, 2, 10); err != nil {
+		t.Fatalf("get updates since: %v", err)
+	}
+}
+
+func TestTelegramRuntimeGetMeCallsHTTPBoundary(t *testing.T) {
+	client := roundTripClient(func(r *http.Request) *http.Response {
+		if r.URL.Path != "/bottoken/getMe" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		return jsonResponse(`{"ok":true,"result":{"id":1,"is_bot":true,"username":"demo"}}`)
+	})
+
+	rt, err := NewRuntime(RuntimeConfig{BotToken: "token", APIBase: "https://telegram.example", HTTPClient: client})
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	me, err := rt.GetMeInfo(context.Background())
+	if err != nil {
+		t.Fatalf("get me: %v", err)
+	}
+	if me.Username != "demo" || me.ID != 1 {
+		t.Fatalf("unexpected me: %#v", me)
 	}
 }
 

@@ -18,11 +18,9 @@
 - [装配与 CLI](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/composition.md)
 - [CLI 架构](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/cli.md)
 - [重构路线图](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/roadmap.md)
+- [PRD 执行状态](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/codex-app-prd-execution-status.md)
 - [Channel 目录](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/channels/README.md)
 - [Channel 消息样式规范](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/channels/message-style.md)
-- [Hermes 返回逻辑深化方案](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/channels/hermes-return-logic-plan.html)
-- [cc-connect 差距记录](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/cc-connect-gap-analysis.md)
-- [Go 重写计划 HTML](/Users/Bigo/Desktop/develop/nova-infra/codex-app/docs/architecture/go-rewrite-plan.html)
 
 ## 规划边界
 

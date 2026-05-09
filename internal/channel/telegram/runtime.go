@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 
@@ -23,15 +24,45 @@ type Runtime struct {
 	client *http.Client
 }
 
+type Me struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username,omitempty"`
+	Name     string `json:"name,omitempty"`
+}
+
 func NewRuntime(cfg RuntimeConfig) (*Runtime, error) {
+	cfg = normalizeConfig(cfg)
 	if err := validate(cfg); err != nil {
 		return nil, err
 	}
 	return &Runtime{Config: cfg, client: httpClient(cfg)}, nil
 }
 
+func NewRuntimeFromEnv() (*Runtime, error) {
+	return NewRuntime(RuntimeConfig{
+		BotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
+		APIBase:  os.Getenv("TELEGRAM_API_BASE"),
+	})
+}
+
 func (r *Runtime) ValidateConfig() error {
-	return validate(r.Config)
+	return validate(normalizeConfig(r.Config))
+}
+
+func (r *Runtime) GetMe(ctx context.Context) error {
+	_, err := r.GetMeInfo(ctx)
+	return err
+}
+
+func (r *Runtime) GetMeInfo(ctx context.Context) (Me, error) {
+	if strings.TrimSpace(r.Config.BotToken) == "" {
+		return Me{}, fmt.Errorf("telegram bot token is not set")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL(r.Config, "getMe", nil), nil)
+	if err != nil {
+		return Me{}, err
+	}
+	return readTelegramMe(r.client, req)
 }
 
 func (r *Runtime) Send(ctx context.Context, msg channelapi.RuntimeMessage) error {
@@ -52,6 +83,10 @@ func (r *Runtime) Send(ctx context.Context, msg channelapi.RuntimeMessage) error
 }
 
 func (r *Runtime) GetUpdates(ctx context.Context, limit int) ([]channelapi.RuntimeUpdate, error) {
+	return r.GetUpdatesSince(ctx, 0, limit, 0)
+}
+
+func (r *Runtime) GetUpdatesSince(ctx context.Context, offset int64, limit int, timeout int) ([]channelapi.RuntimeUpdate, error) {
 	if limit < 0 {
 		return nil, fmt.Errorf("telegram runtime limit must be >=0")
 	}
@@ -61,6 +96,12 @@ func (r *Runtime) GetUpdates(ctx context.Context, limit int) ([]channelapi.Runti
 	query := url.Values{}
 	if limit > 0 {
 		query.Set("limit", strconv.Itoa(limit))
+	}
+	if offset > 0 {
+		query.Set("offset", strconv.FormatInt(offset, 10))
+	}
+	if timeout > 0 {
+		query.Set("timeout", strconv.Itoa(timeout))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL(r.Config, "getUpdates", query), nil)
 	if err != nil {
@@ -80,6 +121,13 @@ func validate(cfg RuntimeConfig) error {
 		return fmt.Errorf("telegram runtime api_base invalid: %w", err)
 	}
 	return nil
+}
+
+func normalizeConfig(cfg RuntimeConfig) RuntimeConfig {
+	if strings.TrimSpace(cfg.APIBase) == "" {
+		cfg.APIBase = "https://api.telegram.org"
+	}
+	return cfg
 }
 
 func httpClient(cfg RuntimeConfig) *http.Client {
@@ -118,6 +166,33 @@ func doTelegram(client *http.Client, req *http.Request) error {
 		return fmt.Errorf("telegram api rejected request: %s", payload.Description)
 	}
 	return nil
+}
+
+func readTelegramMe(client *http.Client, req *http.Request) (Me, error) {
+	resp, err := client.Do(req)
+	if err != nil {
+		return Me{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return Me{}, fmt.Errorf("telegram api status %d", resp.StatusCode)
+	}
+	var payload struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+		Result      struct {
+			ID        int64  `json:"id"`
+			Username  string `json:"username"`
+			FirstName string `json:"first_name"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return Me{}, err
+	}
+	if !payload.OK {
+		return Me{}, fmt.Errorf("telegram api rejected request: %s", payload.Description)
+	}
+	return Me{ID: payload.Result.ID, Username: payload.Result.Username, Name: payload.Result.FirstName}, nil
 }
 
 func readUpdates(client *http.Client, req *http.Request) ([]channelapi.RuntimeUpdate, error) {
@@ -159,9 +234,10 @@ func toRuntimeUpdates(items []telegramUpdate) []channelapi.RuntimeUpdate {
 	updates := make([]channelapi.RuntimeUpdate, 0, len(items))
 	for _, item := range items {
 		updates = append(updates, channelapi.RuntimeUpdate{
-			UpdateID: item.UpdateID,
-			Type:     "message",
-			Payload:  item.Message.Text,
+			UpdateID:  item.UpdateID,
+			Type:      "message",
+			ChannelID: strconv.FormatInt(item.Message.Chat.ID, 10),
+			Payload:   item.Message.Text,
 		})
 	}
 	return updates

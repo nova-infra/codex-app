@@ -59,7 +59,7 @@ func ApplyProfile(events []Event, profile DisplayProfile) ([]Event, []string) {
 		}
 		e := event
 		e.Text = visibleText(e.Text)
-		if e.Text == "" && e.Kind != EventKindMedia && e.Kind != EventKindToolStart && e.Kind != EventKindToolDone {
+		if e.Text == "" && e.Kind != EventKindApproval && e.Kind != EventKindMedia && e.Kind != EventKindToolStart && e.Kind != EventKindToolDone {
 			continue
 		}
 		if e.Kind == EventKindToolStart && profile.ToolProgress == ToolProgressOff {

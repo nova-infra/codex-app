@@ -6,6 +6,8 @@ apps/*/dist/
 dist/
 codex-app-server
 *.log
+.env
+.env.*
 .codex/
 graphify-out/
 packages/**/graphify-out/

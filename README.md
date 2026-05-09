@@ -1,12 +1,8 @@
 # Codex App
 
-统一的 Codex 服务层仓库。
-
-> 说明：本仓库的默认开发入口已切到 Go 版 `cmd/codex-app`，用于实现 `doctor / serve --dry-run / config` 等预检入口。
-> Bun/TS CLI 与 `packages/*` 保留为 Legacy 兼容运行入口。
+统一的 Codex 服务层仓库。当前主线已切到 **Go-only**：唯一运行入口是 `cmd/codex-app`，旧前端脚本 workspace 已移除。
 
 ![Codex App Overview (EN)](docs/project/assets/overview.png)
-## 产品总览
 
 ## 入口
 
@@ -17,26 +13,30 @@
 | 图谱总览 | `graphify-out/GRAPH_REPORT.md` |
 | 目标架构 | `docs/architecture/README.md` |
 | CLI 架构 | `docs/architecture/cli.md` |
-| 重构路线图 | `docs/architecture/roadmap.md` |
-| 版本/发布工作流 | `docs/workflows/versioning-and-release.md` |
+| 部署工作流 | `docs/workflows/deployment.md` |
 | 仓库约束 | `AGENTS.md` |
 
-## Go 入口 smoke 命令
+## Go smoke 命令
 
-- `go run ./cmd/codex-app --help`
-- `go run ./cmd/codex-app doctor`
-- `go run ./cmd/codex-app doctor --config ./config.json`
-- `go run ./cmd/codex-app serve --dry-run`
-- `go run ./cmd/codex-app serve --dry-run --config ./config.json`
-- `go run ./cmd/codex-app render-demo --channel all`
+```bash
+go run ./cmd/codex-app help
+go run ./cmd/codex-app doctor
+go run ./cmd/codex-app serve --dry-run
+go run ./cmd/codex-app render-demo --channel all
+go run ./cmd/codex-app serve --addr 127.0.0.1:8787
+```
 
-## 当前 Go 进度
+服务启动后可访问：
+
+- `GET /health`
+- `GET /version`
+- `GET /config`
+- `GET /render-demo?channel=all`
+
+## 当前 Go 能力
 
 - 支持 JSON 配置加载和 `--config`。
-- `doctor` 会检查默认/指定配置、runtime channel、社交 channel 凭据环境变量。
-- `serve --dry-run` 输出 provider/project/channel 装配计划；非 dry-run 在缺少凭据时 fail fast。
-- 已有 Codex launch command skeleton 与文件 session store skeleton。
-
-## Legacy
-
-- Bun/TS 入口依然保留：`bun run packages/server/src/index.ts`、`bun run packages/cli/src/main.ts`
+- `doctor` 检查 Go runtime、配置、channel 与社交 channel 凭据环境变量；缺少外部凭据以 warning 呈现。
+- `serve --dry-run` 输出 provider/project/channel 装配计划。
+- `serve` 非 dry-run 启动真实 Go HTTP 服务。
+- 已有 Codex launch command skeleton、文件 session store skeleton 与 channel renderer/runtime skeleton。

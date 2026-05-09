@@ -14,7 +14,15 @@ func (r *Renderer) Render(_ context.Context, target render.RenderTarget, events 
 	normalized, warnings := render.ApplyProfile(events, profile)
 	message := render.PlatformMessage{Channel: render.ChannelWeixin, Target: target, Profile: profile, Warnings: warnings}
 	for _, event := range normalized {
-		if event.Kind == render.EventKindApproval || event.Kind == render.EventKindMedia {
+		if event.Kind == render.EventKindApproval {
+			message.Blocks = append(message.Blocks, render.RenderBlock{
+				Type:     "approval_menu",
+				Text:     formatApproval(event),
+				Metadata: approvalMetadata(event),
+			})
+			continue
+		}
+		if event.Kind == render.EventKindMedia {
 			message.Blocks = append(message.Blocks, render.BuildTextBlocks(formatApproval(event), profile.ToolPreviewLength)...)
 			continue
 		}
@@ -36,4 +44,12 @@ func formatApproval(event render.Event) string {
 	}
 	line += "\n回复 1 确认，2 拒绝"
 	return line
+}
+
+func approvalMetadata(event render.Event) map[string]string {
+	metadata := map[string]string{"kind": "approval", "confirm_input": "1", "reject_input": "2"}
+	if event.Approval != nil {
+		metadata["request_id"] = event.Approval.RequestID
+	}
+	return metadata
 }

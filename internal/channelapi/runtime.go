@@ -9,9 +9,11 @@ type RuntimeMessage struct {
 }
 
 type RuntimeUpdate struct {
-	UpdateID int64  `json:"update_id"`
-	Type     string `json:"type"`
-	Payload  string `json:"payload"`
+	UpdateID  int64             `json:"update_id"`
+	Type      string            `json:"type"`
+	ChannelID string            `json:"channel_id,omitempty"`
+	Payload   string            `json:"payload"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
 type ChannelRuntime interface {

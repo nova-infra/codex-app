@@ -28,13 +28,18 @@ func (r *Renderer) Render(_ context.Context, target render.RenderTarget, events 
 			continue
 		case render.EventKindApproval:
 			requestID := ""
+			text := event.Text
 			if event.Approval != nil {
 				requestID = event.Approval.RequestID
+				text = event.Approval.Title
+				if event.Approval.Body != "" {
+					text += "\n" + event.Approval.Body
+				}
 			}
 			message.Blocks = append(message.Blocks, render.RenderBlock{
 				Type:     "card_approval",
-				Text:     event.Text,
-				Metadata: map[string]string{"kind": "approval", "request_id": requestID},
+				Text:     text,
+				Metadata: map[string]string{"kind": "approval", "request_id": requestID, "confirm_action": "confirm", "reject_action": "reject"},
 			})
 		default:
 			message.Blocks = append(message.Blocks, render.RenderBlock{Type: render.BlockType(event.Kind), Text: event.Text, Metadata: map[string]string{"card": "true"}})
