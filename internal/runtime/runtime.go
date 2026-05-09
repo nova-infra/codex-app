@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/nova-infra/codex-app/internal/config"
 	"github.com/nova-infra/codex-app/internal/project"
@@ -24,6 +23,10 @@ func BuildStartupPlanFromConfig(cfg config.Config, projectName string) (StartupP
 	if err != nil {
 		return StartupPlan{}, err
 	}
+	codexHome, err := project.NormalizeCodexHome(proj)
+	if err != nil {
+		return StartupPlan{}, err
+	}
 	channels := append([]string(nil), proj.Platforms...)
 	sort.Strings(channels)
 	services := []string{"codex-session"}
@@ -38,7 +41,7 @@ func BuildStartupPlanFromConfig(cfg config.Config, projectName string) (StartupP
 		Project:       proj.Name,
 		Provider:      providerCfg.Name,
 		ProviderModel: providerCfg.Model,
-		CodexHome:     strings.TrimSpace(proj.CodexHome),
+		CodexHome:     codexHome,
 		DryRun:        false,
 	}, nil
 }
@@ -50,10 +53,7 @@ func BuildStartupPlan(cfg config.Config, projectName string) (StartupPlan, error
 
 // ResolveAndValidateProjectCodexHome checks a project-specific CODEX_HOME string.
 func ResolveAndValidateProjectCodexHome(p project.Config) (string, error) {
-	if err := p.ValidateCodexHome(); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(p.CodexHome), nil
+	return project.NormalizeCodexHome(p)
 }
 
 // ResolveAndValidateProvider wraps project-provider resolution for compatibility.

@@ -10,9 +10,9 @@ import (
 )
 
 type RuntimeConfig struct {
-	AppID   string `json:"app_id"`
-	AppKey  string `json:"app_key"`
-	APIBase string `json:"api_base"`
+	AppID     string `json:"app_id"`
+	AppSecret string `json:"app_secret"`
+	APIBase   string `json:"api_base"`
 }
 
 type Runtime struct {
@@ -48,8 +48,8 @@ func validate(cfg RuntimeConfig) error {
 	if strings.TrimSpace(cfg.AppID) == "" {
 		return fmt.Errorf("lark runtime requires app_id")
 	}
-	if strings.TrimSpace(cfg.AppKey) == "" {
-		return fmt.Errorf("lark runtime requires app_key")
+	if strings.TrimSpace(cfg.AppSecret) == "" {
+		return fmt.Errorf("lark runtime requires app_secret")
 	}
 	if strings.TrimSpace(cfg.APIBase) == "" {
 		return fmt.Errorf("lark runtime requires api_base")

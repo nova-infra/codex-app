@@ -2,8 +2,6 @@ package session
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/nova-infra/codex-app/internal/project"
@@ -40,32 +38,5 @@ func ResolveCodexHome(projectCfg project.Config) (string, error) {
 	if strings.TrimSpace(projectCfg.CodexHome) == "" {
 		return "", fmt.Errorf("project %q: codex_home is required", projectCfg.Name)
 	}
-	home := expandPath(projectCfg.CodexHome)
-	if err := isDirectory(home); err != nil {
-		return "", err
-	}
-	return home, nil
-}
-
-func isDirectory(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("codex home not exists: %s", path)
-		}
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("codex home is not a directory: %s", path)
-	}
-	return nil
-}
-
-func expandPath(path string) string {
-	if strings.HasPrefix(path, "~") {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, path[1:])
-		}
-	}
-	return path
+	return project.PrepareCodexHome(projectCfg)
 }

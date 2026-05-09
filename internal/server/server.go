@@ -74,10 +74,10 @@ func DoctorJSON() (string, error) {
 	report := map[string]any{
 		"ok": true,
 		"data": map[string]any{
-			"cwd":         mustGetwd(),
-			"configPath":  cfgPath,
-			"dataDir":     dataDir,
-			"bunDetected": true,
+			"cwd":        mustGetwd(),
+			"configPath": cfgPath,
+			"dataDir":    dataDir,
+			"goEntry":    "./cmd/codex-app",
 		},
 		"meta": map[string]any{"command": "doctor"},
 	}

@@ -2,6 +2,7 @@ package project
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -104,10 +105,38 @@ func (c Config) ValidateCodexHome() error {
 	if strings.TrimSpace(c.CodexHome) == "" {
 		return fmt.Errorf("project %q: codex_home is required", c.Name)
 	}
-	if filepath.Clean(c.CodexHome) == "." {
+	if filepath.Clean(strings.TrimSpace(c.CodexHome)) == "." {
 		return fmt.Errorf("project %q: codex_home must be explicit", c.Name)
 	}
 	return nil
+}
+
+// NormalizeCodexHome returns an absolute CODEX_HOME path without touching disk.
+func NormalizeCodexHome(c Config) (string, error) {
+	if err := c.ValidateCodexHome(); err != nil {
+		return "", err
+	}
+	expanded := expandTilde(strings.TrimSpace(c.CodexHome))
+	if !filepath.IsAbs(expanded) {
+		expanded = filepath.Join(strings.TrimSpace(c.WorkDir), expanded)
+	}
+	abs, err := filepath.Abs(filepath.Clean(expanded))
+	if err != nil {
+		return "", fmt.Errorf("project %q: invalid codex_home: %w", c.Name, err)
+	}
+	return abs, nil
+}
+
+// PrepareCodexHome normalizes CODEX_HOME and ensures the directory exists.
+func PrepareCodexHome(c Config) (string, error) {
+	abs, err := NormalizeCodexHome(c)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		return "", fmt.Errorf("project %q: cannot prepare codex_home %q: %w", c.Name, abs, err)
+	}
+	return abs, nil
 }
 
 // ResolveProject returns the named project. If empty, it returns the first project.
@@ -124,4 +153,18 @@ func ResolveProject(projects []Config, name string) (Config, error) {
 		}
 	}
 	return Config{}, fmt.Errorf("project %q not found", name)
+}
+
+func expandTilde(value string) string {
+	if value == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+	}
+	if strings.HasPrefix(value, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, value[2:])
+		}
+	}
+	return value
 }

@@ -3,9 +3,9 @@
   "private": true,
   "workspaces": ["packages/*"],
   "scripts": {
-    "dev": "bun run packages/server/src/index.ts",
-    "cli": "bun run packages/cli/src/main.ts",
-    "build": "bun build packages/server/src/index.ts --compile --outfile codex-app-server",
+    "dev": "go run ./cmd/codex-app serve --dry-run",
+    "cli": "go run ./cmd/codex-app",
+    "build": "go build -o codex-app ./cmd/codex-app",
     "go:help": "go run ./cmd/codex-app --help",
     "go:doctor": "go run ./cmd/codex-app doctor",
     "go:smoke": "go run ./cmd/codex-app doctor && go run ./cmd/codex-app serve --dry-run && go run ./cmd/codex-app render-demo --channel all --json",

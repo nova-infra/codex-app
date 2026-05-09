@@ -8,14 +8,14 @@ import (
 )
 
 func TestLarkRuntimeValidate(t *testing.T) {
-	_, err := NewRuntime(RuntimeConfig{AppID: "id", AppKey: "key", APIBase: "https://open.larkoffice.com"})
+	_, err := NewRuntime(RuntimeConfig{AppID: "id", AppSecret: "secret", APIBase: "https://open.larkoffice.com"})
 	if err != nil {
 		t.Fatalf("runtime valid: %v", err)
 	}
 }
 
 func TestLarkRuntimeGetUpdatesRejectNegative(t *testing.T) {
-	rt, err := NewRuntime(RuntimeConfig{AppID: "id", AppKey: "key", APIBase: "https://open.larkoffice.com"})
+	rt, err := NewRuntime(RuntimeConfig{AppID: "id", AppSecret: "secret", APIBase: "https://open.larkoffice.com"})
 	if err != nil {
 		t.Fatalf("init runtime: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestLarkRuntimeGetUpdatesRejectNegative(t *testing.T) {
 }
 
 func TestLarkRuntimeSendRejectEmptyMessage(t *testing.T) {
-	rt, err := NewRuntime(RuntimeConfig{AppID: "id", AppKey: "key", APIBase: "https://open.larkoffice.com"})
+	rt, err := NewRuntime(RuntimeConfig{AppID: "id", AppSecret: "secret", APIBase: "https://open.larkoffice.com"})
 	if err != nil {
 		t.Fatalf("init runtime: %v", err)
 	}

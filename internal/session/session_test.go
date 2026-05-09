@@ -7,10 +7,15 @@ import (
 	"github.com/nova-infra/codex-app/internal/project"
 )
 
-func TestResolveCodexHomeRequiresExistingDir(t *testing.T) {
-	p := project.Config{Name: "default", WorkDir: ".", Agent: "codex", Platforms: []string{"telegram"}, ProviderRefs: []string{"cliproxy"}, CodexHome: "/definitely/does/not/exist"}
-	if _, err := ResolveCodexHome(p); err == nil {
-		t.Fatal("expected missing codex home error")
+func TestResolveCodexHomePreparesDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "codex-home")
+	p := project.Config{Name: "default", WorkDir: ".", Agent: "codex", Platforms: []string{"telegram"}, ProviderRefs: []string{"cliproxy"}, CodexHome: dir}
+	got, err := ResolveCodexHome(p)
+	if err != nil {
+		t.Fatalf("resolve codex home: %v", err)
+	}
+	if got != dir {
+		t.Fatalf("expected codex home %q, got %q", dir, got)
 	}
 }
 
