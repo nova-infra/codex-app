@@ -1,6 +1,9 @@
 package config
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/nova-infra/codex-app/internal/project"
@@ -17,6 +20,44 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if len(cfg.Projects) != 1 {
 		t.Fatalf("expected exactly one default project, got %d", len(cfg.Projects))
+	}
+}
+
+func TestLoadDefaultConfig(t *testing.T) {
+	loaded, err := Load("")
+	if err != nil {
+		t.Fatalf("load default: %v", err)
+	}
+	if loaded.Source != "default" {
+		t.Fatalf("unexpected source: %q", loaded.Source)
+	}
+}
+
+func TestLoadConfigFile(t *testing.T) {
+	cfg := Default()
+	cfg.Projects[0].Name = "custom"
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "codex-app.json")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("load file: %v", err)
+	}
+	if loaded.Config.Projects[0].Name != "custom" {
+		t.Fatalf("unexpected project name: %q", loaded.Config.Projects[0].Name)
+	}
+}
+
+func TestApplyEnvProviderAPIKey(t *testing.T) {
+	t.Setenv("CODEX_APP_PROVIDER_CLIPROXY_API_KEY", "secret")
+	cfg := ApplyEnv(Default())
+	if cfg.Providers[0].APIKey != "secret" {
+		t.Fatalf("expected api key from env, got %q", cfg.Providers[0].APIKey)
 	}
 }
 

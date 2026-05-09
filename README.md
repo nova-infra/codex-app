@@ -25,7 +25,17 @@
 
 - `go run ./cmd/codex-app --help`
 - `go run ./cmd/codex-app doctor`
+- `go run ./cmd/codex-app doctor --config ./config.json`
 - `go run ./cmd/codex-app serve --dry-run`
+- `go run ./cmd/codex-app serve --dry-run --config ./config.json`
+- `go run ./cmd/codex-app render-demo --channel all`
+
+## 当前 Go 进度
+
+- 支持 JSON 配置加载和 `--config`。
+- `doctor` 会检查默认/指定配置、runtime channel、社交 channel 凭据环境变量。
+- `serve --dry-run` 输出 provider/project/channel 装配计划；非 dry-run 在缺少凭据时 fail fast。
+- 已有 Codex launch command skeleton 与文件 session store skeleton。
 
 ## Legacy
 

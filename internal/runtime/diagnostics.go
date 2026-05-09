@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/nova-infra/codex-app/internal/config"
+	"github.com/nova-infra/codex-app/internal/render"
 )
 
 type CheckStatus string
@@ -51,6 +52,14 @@ func (r DoctorReport) String() string {
 }
 
 func RunDoctor() DoctorReport {
+	loaded, err := config.Load("")
+	if err != nil {
+		return DoctorReport{Checks: []CheckResult{{Name: "config", Status: CheckFail, Detail: err.Error()}}}
+	}
+	return RunDoctorWithConfig(loaded.Config, loaded.Source)
+}
+
+func RunDoctorWithConfig(cfg config.Config, source string) DoctorReport {
 	report := DoctorReport{}
 
 	if _, err := exec.LookPath("go"); err == nil {
@@ -66,18 +75,24 @@ func RunDoctor() DoctorReport {
 		report.Checks = append(report.Checks, CheckResult{Name: "module", Status: CheckFail, Detail: "go.mod missing"})
 	}
 
-	cfg := config.Default()
 	if err := cfg.Validate(); err != nil {
 		report.Checks = append(report.Checks, CheckResult{Name: "config", Status: CheckFail, Detail: err.Error()})
 	} else {
-		report.Checks = append(report.Checks, CheckResult{Name: "config", Status: CheckOK, Detail: "default config valid"})
+		report.Checks = append(report.Checks, CheckResult{Name: "config", Status: CheckOK, Detail: fmt.Sprintf("%s config valid", source)})
 	}
 
-	if _, err := os.Stat(config.DefaultRuntime().DefaultChannel); err == nil {
-		report.Checks = append(report.Checks, CheckResult{Name: "runtime", Status: CheckOK, Detail: "runtime default channel configured"})
-	} else {
-		report.Checks = append(report.Checks, CheckResult{Name: "runtime", Status: CheckWarn, Detail: "runtime channel placeholder present"})
+	if len(cfg.EnabledChannels) == 0 {
+		report.Checks = append(report.Checks, CheckResult{Name: "runtime", Status: CheckFail, Detail: "no enabled channels"})
+		return report
 	}
+	for _, ch := range cfg.EnabledChannels {
+		if _, err := render.ParseChannel(ch); err != nil {
+			report.Checks = append(report.Checks, CheckResult{Name: "runtime", Status: CheckFail, Detail: err.Error()})
+			return report
+		}
+	}
+	report.Checks = append(report.Checks, CheckResult{Name: "runtime", Status: CheckOK, Detail: fmt.Sprintf("%d channels configured", len(cfg.EnabledChannels))})
+	report.Checks = append(report.Checks, ChannelCredentialChecks(cfg.EnabledChannels)...)
 
 	return report
 }

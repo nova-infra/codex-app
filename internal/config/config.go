@@ -1,7 +1,9 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -19,6 +21,60 @@ type Config struct {
 	Language  string            `json:"language" toml:"language"`
 	Providers []provider.Config `json:"providers" toml:"providers"`
 	Projects  []project.Config  `json:"projects" toml:"projects"`
+}
+
+type LoadResult struct {
+	Config Config
+	Source string
+}
+
+func Load(path string) (LoadResult, error) {
+	cleanPath := strings.TrimSpace(path)
+	if cleanPath == "" {
+		cfg := ApplyEnv(Default())
+		if err := cfg.Validate(); err != nil {
+			return LoadResult{}, err
+		}
+		return LoadResult{Config: cfg, Source: "default"}, nil
+	}
+	body, err := os.ReadFile(expandPath(cleanPath))
+	if err != nil {
+		return LoadResult{}, fmt.Errorf("read config %q: %w", cleanPath, err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(body, &cfg); err != nil {
+		return LoadResult{}, fmt.Errorf("parse config %q: %w", cleanPath, err)
+	}
+	cfg = ApplyEnv(cfg)
+	if err := cfg.Validate(); err != nil {
+		return LoadResult{}, fmt.Errorf("config %q invalid: %w", cleanPath, err)
+	}
+	return LoadResult{Config: cfg, Source: cleanPath}, nil
+}
+
+func ApplyEnv(cfg Config) Config {
+	providers := append([]provider.Config(nil), cfg.Providers...)
+	for i, item := range providers {
+		key := providerEnvKey(item.Name)
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			item.APIKey = value
+		}
+		if value := strings.TrimSpace(os.Getenv("CODEX_APP_PROVIDER_API_KEY")); value != "" && item.APIKey == "" {
+			item.APIKey = value
+		}
+		providers[i] = item
+	}
+	cfg.Providers = providers
+	return cfg
+}
+
+func providerEnvKey(name string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(name))
+	normalized = strings.NewReplacer("-", "_", ".", "_").Replace(normalized)
+	if normalized == "" {
+		return "CODEX_APP_PROVIDER_API_KEY"
+	}
+	return "CODEX_APP_PROVIDER_" + normalized + "_API_KEY"
 }
 
 // RuntimeConfig contains the small amount of runtime state needed by the
@@ -117,4 +173,18 @@ func (c Config) Validate() error {
 	}
 
 	return nil
+}
+
+func expandPath(path string) string {
+	if path == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+	}
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home + path[1:]
+		}
+	}
+	return path
 }

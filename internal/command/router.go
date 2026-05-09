@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/nova-infra/codex-app/internal/channel"
+	"github.com/nova-infra/codex-app/internal/config"
 	"github.com/nova-infra/codex-app/internal/kernel"
 	"github.com/nova-infra/codex-app/internal/runtime"
 	"github.com/nova-infra/codex-app/internal/server"
@@ -22,8 +23,8 @@ Usage:
   codex-app project list
   codex-app provider list
   codex-app capabilities list [--channel <telegram|wechat|lark|all>]
-  codex-app serve [--dry-run] [--project <name>]
-  codex-app doctor
+  codex-app serve [--dry-run] [--project <name>] [--config <path>]
+  codex-app doctor [--config <path>]
   codex-app help
 
 The Go preview is milestone 2 of the rewrite. It renders a mock Codex event
@@ -138,15 +139,25 @@ func (r *Router) Run(args []string) error {
 
 func (r *Router) runDoctor(args []string) error {
 	jsonMode, args := parseJSONCommand(args)
-	if len(args) != 0 {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	configPath := fs.String("config", "", "path to JSON config")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
 		return errors.New("doctor does not accept positional arguments")
 	}
-	report := runtime.RunDoctor()
+	loaded, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	report := runtime.RunDoctorWithConfig(loaded.Config, loaded.Source)
 	if jsonMode {
 		return printJSON(r.out, map[string]any{
 			"ok":   report.Ok(),
 			"data": report.Checks,
-			"meta": map[string]string{"command": "doctor"},
+			"meta": map[string]string{"command": "doctor", "config": loaded.Source},
 		})
 	}
 	if report.Ok() {
@@ -206,13 +217,14 @@ func (r *Router) runServe(args []string) error {
 	fs.SetOutput(io.Discard)
 	dryRun := fs.Bool("dry-run", false, "print startup plan without starting")
 	projectName := fs.String("project", "", "project name to use")
+	configPath := fs.String("config", "", "path to JSON config")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return errors.New("serve does not accept positional arguments")
 	}
-	plan, err := server.NewServePlan(*dryRun, *projectName)
+	plan, err := server.NewServePlanWithConfig(*dryRun, *projectName, *configPath)
 	if err != nil {
 		return err
 	}
@@ -222,7 +234,7 @@ func (r *Router) runServe(args []string) error {
 			"data": map[string]any{"project": *projectName, "dry_run": *dryRun, "plan": plan.Plan},
 		})
 	}
-	msg, err := server.Start(server.ServeOptions{DryRun: *dryRun, ProjectName: *projectName})
+	msg, err := server.Start(server.ServeOptions{DryRun: *dryRun, ProjectName: *projectName, ConfigPath: *configPath})
 	if err != nil {
 		return err
 	}

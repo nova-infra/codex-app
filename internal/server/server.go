@@ -1,12 +1,10 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/nova-infra/codex-app/internal/config"
 	"github.com/nova-infra/codex-app/internal/runtime"
@@ -15,21 +13,30 @@ import (
 type ServeOptions struct {
 	DryRun      bool
 	ProjectName string
+	ConfigPath  string
 }
 
 type ServePlan struct {
-	Plan   runtime.StartupPlan
-	DryRun bool
+	Plan         runtime.StartupPlan
+	DryRun       bool
+	ConfigSource string
 }
 
 func NewServePlan(dryRun bool, projectName string) (ServePlan, error) {
-	cfg := config.Default()
-	plan, err := runtime.BuildStartupPlanFromConfig(cfg, projectName)
+	return NewServePlanWithConfig(dryRun, projectName, "")
+}
+
+func NewServePlanWithConfig(dryRun bool, projectName string, configPath string) (ServePlan, error) {
+	loaded, err := config.Load(configPath)
+	if err != nil {
+		return ServePlan{}, err
+	}
+	plan, err := runtime.BuildStartupPlanFromConfig(loaded.Config, projectName)
 	if err != nil {
 		return ServePlan{}, err
 	}
 	plan.DryRun = dryRun
-	return ServePlan{Plan: plan, DryRun: dryRun}, nil
+	return ServePlan{Plan: plan, DryRun: dryRun, ConfigSource: loaded.Source}, nil
 }
 
 func (s ServePlan) String() string {
@@ -41,18 +48,17 @@ func (s ServePlan) String() string {
 }
 
 func Start(options ServeOptions) (string, error) {
-	plan, err := NewServePlan(options.DryRun, options.ProjectName)
+	plan, err := NewServePlanWithConfig(options.DryRun, options.ProjectName, options.ConfigPath)
 	if err != nil {
 		return "", err
 	}
 	if options.DryRun {
 		return plan.String(), nil
 	}
-	// intentionally keep preview dry-run only: no long polling in this milestone.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-	<-ctx.Done()
-	return fmt.Sprintf("serve aborted in preview mode: %s", runtime.StartupSummary(plan.Plan)), nil
+	if err := runtime.MissingChannelEnvError(plan.Plan.Channels); err != nil {
+		return "", err
+	}
+	return "", fmt.Errorf("serve non-dry-run is blocked until channel credentials are configured; verified plan: %s", runtime.StartupSummary(plan.Plan))
 }
 
 func ensureConfigPaths() (string, string) {

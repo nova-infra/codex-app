@@ -627,16 +627,21 @@ mode = "yolo"</code></pre>
         <h2>08. 命令与验证</h2>
         <h3>开发期命令</h3>
         <pre><code>go test ./...
+go vet ./...
 go run ./cmd/codex-app --help
 go run ./cmd/codex-app doctor
-go run ./cmd/codex-app config validate
-go run ./cmd/codex-app provider list --project default
-go run ./cmd/codex-app sessions list --project default</code></pre>
+go run ./cmd/codex-app doctor --config ./config.json
+go run ./cmd/codex-app serve --dry-run
+go run ./cmd/codex-app serve --dry-run --config ./config.json
+go run ./cmd/codex-app render-demo --channel all
+go run ./cmd/codex-app capabilities list --channel all</code></pre>
+        <div class="callout"><strong>当前进度：</strong>Go 入口已具备 JSON 配置加载、provider/project 校验、project-local <code>CODEX_HOME</code> payload、Codex launch command skeleton、文件 session store skeleton、三端 channel credential preflight，以及 <code>doctor/serve --dry-run/render-demo</code> smoke。非 dry-run 会在缺少 Telegram/Weixin/Lark 凭据时 fail fast，不再使用 10ms placeholder。</div>
         <h3>每阶段最低验收</h3>
         <ul>
           <li>Phase 1：CLI 能启动，默认配置路径可打印。</li>
-          <li>Phase 2：<code>config validate</code> 能验证 provider/project/codex_home。</li>
-          <li>Phase 4：能启动 Codex app-server 并创建 session。</li>
+          <li>Phase 2：<code>doctor --config</code> 和 <code>serve --dry-run --config</code> 能验证 provider/project/codex_home。</li>
+          <li>Phase 3：session store、channel credential preflight、Hermes-style render contract 均可通过 Go 测试验证。</li>
+          <li>Phase 4：能生成 Codex app-server launch command，并进入真实 session resume/fallback 实现。</li>
           <li>Phase 5：Telegram 手机端完成一次真实 Codex turn。</li>
           <li>Phase 6：Weixin 手机端完成一次真实 Codex turn。</li>
           <li>Phase 7：Feishu/Lark 群聊或私聊完成一次真实 Codex turn。</li>

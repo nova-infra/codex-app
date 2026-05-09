@@ -16,10 +16,10 @@ func TestStartDryRunReturnsPlan(t *testing.T) {
 
 func TestStartLiveReturnsPlan(t *testing.T) {
 	out, err := Start(ServeOptions{DryRun: false})
-	if err != nil {
-		t.Fatalf("start: %v", err)
+	if err == nil {
+		t.Fatal("expected non-dry-run preview blocker")
 	}
-	if out == "" {
-		t.Fatal("expected output")
+	if out != "" {
+		t.Fatalf("expected no output on blocked start, got %q", out)
 	}
 }

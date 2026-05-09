@@ -2,10 +2,14 @@ package command
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/nova-infra/codex-app/internal/config"
 	"github.com/nova-infra/codex-app/internal/render"
 )
 
@@ -112,6 +116,18 @@ func TestRunDoctorJSON(t *testing.T) {
 	}
 }
 
+func TestRunDoctorWithConfig(t *testing.T) {
+	path := writeTestConfig(t, "custom")
+	var out bytes.Buffer
+	r := NewRouter(&out)
+	if err := r.Run([]string{"doctor", "--config", path}); err != nil {
+		t.Fatalf("run doctor config: %v", err)
+	}
+	if !strings.Contains(out.String(), path) {
+		t.Fatalf("expected config path in doctor output, got %q", out.String())
+	}
+}
+
 func TestRunServeDryRunJSON(t *testing.T) {
 	var out bytes.Buffer
 	r := NewRouter(&out)
@@ -121,6 +137,18 @@ func TestRunServeDryRunJSON(t *testing.T) {
 	got := out.String()
 	if !strings.Contains(got, "\"dry_run\": true") {
 		t.Fatalf("expect dry_run true in output: %q", got)
+	}
+}
+
+func TestRunServeDryRunWithConfig(t *testing.T) {
+	path := writeTestConfig(t, "custom")
+	var out bytes.Buffer
+	r := NewRouter(&out)
+	if err := r.Run([]string{"serve", "--dry-run", "--config", path}); err != nil {
+		t.Fatalf("run serve config: %v", err)
+	}
+	if !strings.Contains(out.String(), "\"project\": \"custom\"") {
+		t.Fatalf("expected custom project, got %q", out.String())
 	}
 }
 
@@ -148,4 +176,19 @@ func TestParseJSONCommand(t *testing.T) {
 			t.Fatalf("args[%d]=%q want=%q", i, args[i], want[i])
 		}
 	}
+}
+
+func writeTestConfig(t *testing.T, projectName string) string {
+	t.Helper()
+	cfg := config.Default()
+	cfg.Projects[0].Name = projectName
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
