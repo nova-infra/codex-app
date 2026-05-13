@@ -27,6 +27,10 @@ func NewExecResponderFromEnv() ExecResponder {
 }
 
 func (r ExecResponder) Respond(ctx context.Context, userText string) (string, error) {
+	return r.StreamRespond(ctx, userText, nil)
+}
+
+func (r ExecResponder) StreamRespond(ctx context.Context, userText string, onDelta func(string)) (string, error) {
 	text := strings.TrimSpace(userText)
 	if text == "" {
 		return "", fmt.Errorf("codex prompt is empty")
@@ -45,7 +49,14 @@ func (r ExecResponder) Respond(ctx context.Context, userText string) (string, er
 	if err != nil {
 		return "", fmt.Errorf("codex exec failed: %w: %s", err, trimOutput(out))
 	}
-	return readCodexAnswer(outputPath, out)
+	answer, err := readCodexAnswer(outputPath, out)
+	if err != nil {
+		return "", err
+	}
+	if onDelta != nil && answer != "" {
+		onDelta(answer)
+	}
+	return answer, nil
 }
 
 func (r ExecResponder) run(ctx context.Context, outputPath string, text string) ([]byte, error) {

@@ -56,6 +56,34 @@ func TestTelegramPollingContinuesAfterReplyError(t *testing.T) {
 	}
 }
 
+func TestTelegramPollingStreamsCodexReply(t *testing.T) {
+	t.Setenv("CODEX_APP_DISABLE_CODEX", "true")
+	runtime := &fakeTelegramPollRuntime{}
+	runner := &telegramPollingRunner{runtime: runtime}
+
+	responder := fakeStreamingResponder{
+		deltas: []string{
+			"第一段",
+			strings.Repeat("第二段", 20),
+			strings.Repeat("第三段", 20),
+		},
+		final: "第一段" + strings.Repeat("第二段", 20) + strings.Repeat("第三段", 20),
+	}
+
+	if err := runner.streamTelegramReply(context.Background(), "chat-1", "第一段第二段第三段", responder); err != nil {
+		t.Fatalf("stream reply: %v", err)
+	}
+	if len(runtime.sent) != 1 {
+		t.Fatalf("sent count = %d, want 1", len(runtime.sent))
+	}
+	if len(runtime.edits) == 0 {
+		t.Fatalf("expected edits, got none")
+	}
+	if got := runtime.edits[len(runtime.edits)-1].Text; !strings.HasPrefix(got, "第一段") || !strings.Contains(got, "第三段") {
+		t.Fatalf("final text = %q", got)
+	}
+}
+
 func TestWeixinPollingHandlesInboundReply(t *testing.T) {
 	t.Setenv("CODEX_APP_DISABLE_CODEX", "true")
 	runtime := &fakeWeixinPollRuntime{}
@@ -108,7 +136,27 @@ func TestWeixinPollingContinuesAfterReplyError(t *testing.T) {
 
 type fakeTelegramPollRuntime struct {
 	sent          []channelapi.RuntimeMessage
+	edits         []channelapi.RuntimeMessage
 	failFirstSend bool
+}
+
+type fakeStreamingResponder struct {
+	deltas []string
+	final  string
+	err    error
+}
+
+func (f fakeStreamingResponder) Respond(context.Context, string) (string, error) {
+	return f.final, f.err
+}
+
+func (f fakeStreamingResponder) StreamRespond(_ context.Context, _ string, onDelta func(string)) (string, error) {
+	for _, delta := range f.deltas {
+		if onDelta != nil {
+			onDelta(delta)
+		}
+	}
+	return f.final, f.err
 }
 
 func (f *fakeTelegramPollRuntime) Send(_ context.Context, msg channelapi.RuntimeMessage) error {
@@ -117,6 +165,18 @@ func (f *fakeTelegramPollRuntime) Send(_ context.Context, msg channelapi.Runtime
 		return errors.New("send failed")
 	}
 	f.sent = append(f.sent, msg)
+	return nil
+}
+
+func (f *fakeTelegramPollRuntime) SendMessage(_ context.Context, msg channelapi.RuntimeMessage) (int64, error) {
+	if err := f.Send(context.Background(), msg); err != nil {
+		return 0, err
+	}
+	return int64(len(f.sent)), nil
+}
+
+func (f *fakeTelegramPollRuntime) EditMessageText(_ context.Context, chatID string, _ int64, text string) error {
+	f.edits = append(f.edits, channelapi.RuntimeMessage{ChannelID: chatID, Text: text})
 	return nil
 }
 

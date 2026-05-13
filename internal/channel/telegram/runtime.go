@@ -66,14 +66,43 @@ func (r *Runtime) GetMeInfo(ctx context.Context) (Me, error) {
 }
 
 func (r *Runtime) Send(ctx context.Context, msg channelapi.RuntimeMessage) error {
+	_, err := r.SendMessage(ctx, msg)
+	return err
+}
+
+func (r *Runtime) SendMessage(ctx context.Context, msg channelapi.RuntimeMessage) (int64, error) {
 	if strings.TrimSpace(msg.ChannelID) == "" {
-		return fmt.Errorf("telegram runtime requires channel_id")
+		return 0, fmt.Errorf("telegram runtime requires channel_id")
 	}
 	if strings.TrimSpace(msg.Text) == "" {
-		return fmt.Errorf("telegram runtime requires non-empty text")
+		return 0, fmt.Errorf("telegram runtime requires non-empty text")
 	}
 	endpoint := apiURL(r.Config, "sendMessage", nil)
 	form := url.Values{"chat_id": {msg.ChannelID}, "text": {msg.Text}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return readTelegramMessageResult(r.client, req)
+}
+
+func (r *Runtime) EditMessageText(ctx context.Context, chatID string, messageID int64, text string) error {
+	if strings.TrimSpace(chatID) == "" {
+		return fmt.Errorf("telegram runtime requires channel_id")
+	}
+	if messageID <= 0 {
+		return fmt.Errorf("telegram runtime requires message_id")
+	}
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("telegram runtime requires non-empty text")
+	}
+	endpoint := apiURL(r.Config, "editMessageText", nil)
+	form := url.Values{
+		"chat_id":    {chatID},
+		"message_id": {strconv.FormatInt(messageID, 10)},
+		"text":       {text},
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
@@ -166,6 +195,34 @@ func doTelegram(client *http.Client, req *http.Request) error {
 		return fmt.Errorf("telegram api rejected request: %s", payload.Description)
 	}
 	return nil
+}
+
+func readTelegramMessageResult(client *http.Client, req *http.Request) (int64, error) {
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, fmt.Errorf("telegram api status %d", resp.StatusCode)
+	}
+	var payload struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+		Result      struct {
+			MessageID int64 `json:"message_id"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return 0, err
+	}
+	if !payload.OK {
+		return 0, fmt.Errorf("telegram api rejected request: %s", payload.Description)
+	}
+	if payload.Result.MessageID <= 0 {
+		return 0, fmt.Errorf("telegram api returned empty message_id")
+	}
+	return payload.Result.MessageID, nil
 }
 
 func readTelegramMe(client *http.Client, req *http.Request) (Me, error) {

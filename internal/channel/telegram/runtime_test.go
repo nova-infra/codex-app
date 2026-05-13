@@ -51,6 +51,56 @@ func TestTelegramRuntimeSendCallsHTTPBoundary(t *testing.T) {
 	}
 }
 
+func TestTelegramRuntimeSendMessageReturnsMessageID(t *testing.T) {
+	client := roundTripClient(func(r *http.Request) *http.Response {
+		if r.URL.Path != "/bottoken/sendMessage" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		return jsonResponse(`{"ok":true,"result":{"message_id":77}}`)
+	})
+
+	rt, err := NewRuntime(RuntimeConfig{BotToken: "token", APIBase: "https://telegram.example", HTTPClient: client})
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	messageID, err := rt.SendMessage(context.Background(), channelapi.RuntimeMessage{ChannelID: "chat-1", Text: "hello"})
+	if err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+	if messageID != 77 {
+		t.Fatalf("message id = %d, want 77", messageID)
+	}
+}
+
+func TestTelegramRuntimeEditMessageTextCallsHTTPBoundary(t *testing.T) {
+	client := roundTripClient(func(r *http.Request) *http.Response {
+		if r.URL.Path != "/bottoken/editMessageText" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		if got := r.Form.Get("chat_id"); got != "chat-1" {
+			t.Fatalf("chat_id = %q", got)
+		}
+		if got := r.Form.Get("message_id"); got != "12" {
+			t.Fatalf("message_id = %q", got)
+		}
+		if got := r.Form.Get("text"); got != "updated" {
+			t.Fatalf("text = %q", got)
+		}
+		return jsonResponse(`{"ok":true,"result":true}`)
+	})
+
+	rt, err := NewRuntime(RuntimeConfig{BotToken: "token", APIBase: "https://telegram.example", HTTPClient: client})
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	if err := rt.EditMessageText(context.Background(), "chat-1", 12, "updated"); err != nil {
+		t.Fatalf("edit message: %v", err)
+	}
+}
+
 func TestTelegramRuntimeGetUpdatesCallsHTTPBoundary(t *testing.T) {
 	client := roundTripClient(func(r *http.Request) *http.Response {
 		if r.URL.Path != "/bottoken/getUpdates" {

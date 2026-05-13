@@ -32,7 +32,7 @@
 | Weixin token/send/update API | 已完成到 runtime/CLI | `internal/channel/weixin` 已接企业微信 `gettoken/message/send` 与 iLink `getupdates/sendmessage`；`weixin qr-wait --write-env` 可生成真实登录二维码、等待确认并写入本地 `.env` |
 | Lark 真实消息链路 | 已完成最小闭环 | `lark token --json` 通过；Lark WebSocket connected；真实 Lark 消息出现 `message received` 和 `message replied` |
 | 三端服务态 | 已完成到机器门禁 | `/health` 显示 `lark_ws_status=connected`、`telegram_polling_status=running`、`weixin_polling_status=running`；`release-check --smoke` 内置 `service.health` |
-| 发布门禁 | 已完成到机器可读检查；最终 E2E 门禁仍 blocked | `release-check --json --smoke --strict-exit` 覆盖 config、approval.render/input、Lark token、Telegram token/chat/smoke、Weixin iLink/smoke、service.health；`release-check --json --smoke --require-e2e --strict-exit` 当前真实输出 `ok=false`，阻塞在 `weixin.inbound_e2e` 与 `approval.real_e2e` |
+| 发布门禁 | 已完成到机器可读检查；最终 E2E 门禁仍 blocked | `release-check --json --smoke --strict-exit` 覆盖 config、approval.render/input、Lark token、Telegram token/chat/smoke、Weixin iLink/smoke、service.health；`release-check --json --smoke --require-e2e --strict-exit` 当前真实输出 `ok=false`，仅阻塞在 `approval.real_e2e` |
 | 发布解锁入口 | 已完成 | `release-unblock --json` 一次输出 Telegram bot/deep link、临时 Weixin QR、当前 QR 确认命令、微信最终 E2E 等待命令、一键串联 `weixin_full_e2e` 和 `--require-e2e` 最终发布门禁；QR 有效期很短，必须以实时命令输出为准，不在文档固化链接 |
 | Phase 8 删除 TS legacy | 已进入 Go-only 工作树 | `packages/`、`package.json`、`bun.lock`、`tsconfig.json` 已从当前工作树删除；当前测试与 CLI 不依赖 Bun/TS 主线 |
 
@@ -64,9 +64,9 @@ graphify update .
 
 ## 剩余强验收项
 
-1. Weixin 需要由用户客户端在 iLink 会话发 `/approval-demo`，收到菜单后发 `1` 或 `2`；`weixin wait --reply --write-e2e --until-approval` 成功后会写入 `CODEX_APP_E2E_WEIXIN_INBOUND=true` 与 `CODEX_APP_E2E_APPROVAL_REAL=true`。
-2. Telegram 已出现 inbound auto-reply 日志；后续只需保留为回归证据，不再是 blocker。
-3. 三端 approval 真实点击/回复交互仍需平台 E2E 覆盖；core contract、三端渲染 contract、入站文本 contract 已完成；最终门禁以 `--require-e2e` 为准。
+1. Telegram inbound 已写入 `CODEX_APP_E2E_TELEGRAM_INBOUND=true`，不再是 blocker。
+2. Weixin inbound 已写入 `CODEX_APP_E2E_WEIXIN_INBOUND=true`，不再是 blocker。
+3. 还需要一次真实平台上的 approval 交互：发送 `/approval-demo` 后，在实际菜单里确认或拒绝，才能写入 `CODEX_APP_E2E_APPROVAL_REAL=true`。
 
 ## 策略硬化记录
 
@@ -101,17 +101,15 @@ graphify update .
 
 ## 当前结论
 
-本地 Alpha、Phase 0-4、provider 写入策略、approval core contract、三端 approval 渲染/输入 contract、Go-only 工作树、Lark 最小真实收发、Telegram token/chat/send smoke + inbound auto-reply、Weixin iLink 扫码/token/getupdates smoke、三端服务健康检查已经闭合。当前不能标记“三端完整发布态”完成：`release-check --json --smoke --require-e2e --strict-exit` 仍因 `weixin.inbound_e2e` 与 `approval.real_e2e` blocked 退出失败。
+本地 Alpha、Phase 0-4、provider 写入策略、approval core contract、三端 approval 渲染/输入 contract、Go-only 工作树、Lark 最小真实收发、Telegram token/chat/send smoke + inbound auto-reply、Weixin iLink 扫码/token/getupdates smoke、三端服务健康检查已经闭合。当前不能标记“三端完整发布态”完成：`release-check --json --smoke --require-e2e --strict-exit` 仍因 `approval.real_e2e` blocked 退出失败。
 
 ## 交接未完成项
 
-当前未完成项只有真实微信客户端入站与真实 approval E2E：
+当前未完成项只有真实 approval E2E：
 
-1. 运行 `go run ./cmd/codex-app release-unblock --json` 获取实时 `weixin_qrcode_url` 与 `weixin_full_e2e`。
-2. 打开 `weixin_qrcode_url` 并扫码确认；`weixin_full_e2e` 会等待当前 QR，写入 `WEIXIN_ILINK_BOT_TOKEN`。
-3. 在扫码后的微信 iLink 机器人会话发送 `/approval-demo`。
-4. 收到回复后发送 `1` 或 `2`。
-5. 成功后 `.env` 会写入 `CODEX_APP_E2E_WEIXIN_INBOUND=true` 与 `CODEX_APP_E2E_APPROVAL_REAL=true`。
-6. 最终以 `go run ./cmd/codex-app release-check --json --smoke --require-e2e --strict-exit` 作为完成判定；该命令通过前不能把 `$nova-goal 实现 三端完整发布态` 标记完成。
+1. 在真实平台里触发一次 `/approval-demo`。
+2. 在平台返回的真实菜单里完成 confirm/reject。
+3. 让 `CODEX_APP_E2E_APPROVAL_REAL=true` 写入 `.env`。
+4. 最终以 `go run ./cmd/codex-app release-check --json --smoke --require-e2e --strict-exit` 作为完成判定；该命令通过前不能把 `$nova-goal 实现 三端完整发布态` 标记完成。
 
-最近一次事实结果：2026-05-10 05:10 左右，QR 扫码确认和 token 写入已经成功；随后 `weixin wait --json --timeout 240 --reply --write-e2e --until-approval` 因 240 秒内未收到微信会话消息而超时。
+最近一次事实结果：2026-05-11 14:01，`release-check --json --smoke --require-e2e --strict-exit` 真实输出仅剩 `approval.real_e2e` blocked；Telegram 与 Weixin inbound 都已是 `ok`。
